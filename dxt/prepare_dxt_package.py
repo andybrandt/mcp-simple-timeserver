@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Prepare DXT package directory structure for mcp-simple-timeserver.
-This script creates a directory ready to be packaged by the DXT CLI tool.
+Prepares the DXT package structure after the executable has been built.
 """
 
 import json
@@ -12,6 +11,9 @@ import subprocess
 import sys
 from pathlib import Path
 import tomllib
+
+# Import the build script
+import build_executable
 
 def to_display_name(name: str) -> str:
     """Converts a slug-like name to a display name.
@@ -33,8 +35,14 @@ def prepare_dxt_package():
     script_dir = Path(__file__).parent
     root_dir = script_dir.parent
     build_dir = root_dir / "dxt_build"
-    server_dir = build_dir / "server"
-    venv_dir = server_dir / "venv"
+    dist_dir = script_dir / "dist"
+    
+    # Run the PyInstaller build first
+    print("--- Running PyInstaller build ---")
+    if not build_executable.build():
+        print("Build failed. Aborting.", file=sys.stderr)
+        sys.exit(1)
+    print("--- PyInstaller build complete ---")
 
     # Read metadata from pyproject.toml
     print("Reading metadata from pyproject.toml...")
@@ -48,9 +56,7 @@ def prepare_dxt_package():
         project_version = project_meta["version"]
         project_description = project_meta["description"]
         author_info = project_meta["authors"][0]
-        dependencies = project_meta.get("dependencies", [])
         homepage_url = project_meta.get("urls", {}).get("Homepage", "")
-        python_version_req = project_meta.get("requires-python", ">=3.11")
         
         license_str = "MIT" # Default
         for classifier in project_meta.get("classifiers", []):
@@ -64,76 +70,30 @@ def prepare_dxt_package():
     # Generate display name
     display_name = to_display_name(project_name)
 
-    # Clean previous build
+    # Clean previous DXT staging build
     if build_dir.exists():
-        print(f"Cleaning previous build directory: {build_dir}")
+        print(f"Cleaning previous DXT staging directory: {build_dir}")
         shutil.rmtree(build_dir)
     
     # Create directory structure
-    print("Creating DXT directory structure...")
-    server_dir.mkdir(parents=True, exist_ok=True)
+    print("Creating DXT staging directory...")
+    build_dir.mkdir(parents=True, exist_ok=True)
     
-    # Copy server files
-    print("Copying server files...")
-    shutil.copytree(
-        root_dir / "mcp_simple_timeserver",
-        server_dir / "mcp_simple_timeserver",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
-    )
+    # Move the executable
+    system = platform.system()
+    exe_name = f"{project_name}.exe" if system == "Windows" else project_name
+    src_exe_path = dist_dir / exe_name
+    dest_exe_path = build_dir / exe_name
+    print(f"Moving executable from {src_exe_path} to {dest_exe_path}...")
+    shutil.move(str(src_exe_path), str(dest_exe_path))
     
-    # Copy launcher scripts
-    print("Copying launcher scripts...")
-    shutil.copy2(script_dir / "launcher.bat", build_dir / "launcher.bat")
-    shutil.copy2(script_dir / "launcher.sh", build_dir / "launcher.sh")
-    
-    # Copy icon if it exists
+    # Copy icon
     icon_path = script_dir / "icon.png"
     if icon_path.exists():
+        print("Copying icon...")
         shutil.copy2(icon_path, build_dir / "icon.png")
-    
-    # Make launcher.sh executable
-    launcher_sh = build_dir / "launcher.sh"
-    launcher_sh.chmod(launcher_sh.stat().st_mode | 0o755)
-    
-    # Create virtual environment
-    print(f"Creating virtual environment in {venv_dir}...")
-    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
-    
-    # Install dependencies
-    print("Installing dependencies...")
-    if platform.system() == "Windows":
-        pip_path = venv_dir / "Scripts" / "pip.exe"
-    else:
-        pip_path = venv_dir / "bin" / "pip"
-    
-    subprocess.run([
-        str(pip_path), "install", "--no-cache-dir",
-        *dependencies
-    ], check=True)
-    
-    # Remove home line from pyvenv.cfg to make it relocatable
-    pyvenv_cfg = venv_dir / "pyvenv.cfg"
-    if pyvenv_cfg.exists():
-        print("Making virtual environment relocatable...")
-        lines = pyvenv_cfg.read_text().splitlines()
-        # Keep all lines except the home line - let launcher set it
-        filtered_lines = [line for line in lines if not line.startswith("home = ")]
-        # Add a placeholder that the launcher will replace
-        filtered_lines.insert(0, "home = WILL_BE_SET_BY_LAUNCHER")
-        pyvenv_cfg.write_text("\n".join(filtered_lines) + "\n")
-    
-    # Determine platform-specific command
-    system = platform.system()
-    if system == "Windows":
-        entry_point = "launcher.bat"
-        mcp_command = "cmd.exe"
-        mcp_args = ["/c", "${__dirname}\\launcher.bat"]
-    else:
-        entry_point = "launcher.sh"
-        mcp_command = "/bin/bash"
-        mcp_args = ["${__dirname}/launcher.sh"]
-    
-    # Create manifest with all required DXT fields
+
+    # Create simplified manifest
     manifest = {
         "dxt_version": "0.1",
         "name": project_name,
@@ -154,13 +114,8 @@ def prepare_dxt_package():
         "keywords": ["time", "ntp", "mcp", "server", "utility"],
         "server": {
             "type": "binary",
-            "entry_point": entry_point,
             "mcp_config": {
-                "command": mcp_command,
-                "args": mcp_args,
-                "env": {
-                    "PYTHONPATH": "${__dirname}/server"
-                }
+                "command": f"${{__dirname}}/{exe_name}"
             }
         },
         "tools": [
@@ -175,31 +130,26 @@ def prepare_dxt_package():
         ],
         "compatibility": {
             "claude_desktop": ">=0.10.0",
-            "platforms": ["darwin", "win32"],
-            "runtimes": {
-                "python": python_version_req
-            }
+            "platforms": [platform.system().lower().replace("windows", "win32").replace("darwin", "darwin")]
         }
     }
     
+    # Add OS-specific compatibility info if available from CI environment
+    if system == 'Darwin' and os.getenv('RUNNER_OS_VERSION'):
+        manifest['compatibility']['macos_version'] = f">={os.getenv('RUNNER_OS_VERSION')}"
+
     # Add icon if it exists
     if (build_dir / "icon.png").exists():
         manifest["icon"] = "icon.png"
     
     manifest_path = build_dir / "manifest.json"
-    print(f"Creating manifest.json for {system}...")
+    print(f"Creating manifest.json...")
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     
     print(f"\nDXT package prepared in: {build_dir}")
-    print(f"Platform: {system}")
-    print(f"Command: {mcp_command} {' '.join(mcp_args)}")
-    print("\nTo create the DXT package, run:")
-    print(f"  npx @anthropic-ai/dxt pack ./dxt_build mcp-simple-timeserver-{system.lower()}.dxt")
-    
-    # Write version to a file for the CI workflow to use
     (build_dir / "version.txt").write_text(project_version)
-
+    
     return build_dir
 
 if __name__ == "__main__":
