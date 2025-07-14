@@ -24,7 +24,6 @@ def build():
         "pyinstaller",
         "--name", exe_name,
         "--onefile",
-        "--icon", str(icon_path),
         "--distpath", str(root_dir / "dxt" / "dist"),
         "--workpath", str(root_dir / "dxt" / "build"),
         "--specpath", str(root_dir / "dxt"),
@@ -33,6 +32,11 @@ def build():
     # Add Windows-specific option
     if system == "Windows":
         command.append("--noconsole")
+    else:
+        # Icons for executables are not supported in the same way on non-Windows
+        # platforms and PNG is not a valid format for Windows executables.
+        # The icon in the manifest is what's used by the client UI.
+        command.append(f"--icon={icon_path}")
 
     # Add the script to compile
     command.append(str(script_to_compile))
