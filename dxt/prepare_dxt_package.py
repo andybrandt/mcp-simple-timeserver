@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 import tomllib
 
-# Import the build script
+# Add the script's directory to the path to allow importing build_executable
+sys.path.append(str(Path(__file__).parent.resolve()))
 import build_executable
 
 def to_display_name(name: str) -> str:
