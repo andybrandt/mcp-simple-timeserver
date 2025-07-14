@@ -14,6 +14,7 @@ import tomllib
 
 # Add the script's directory to the path to allow importing build_executable
 sys.path.append(str(Path(__file__).parent.resolve()))
+# Import the build script
 import build_executable
 
 def to_display_name(name: str) -> str:
@@ -94,6 +95,19 @@ def prepare_dxt_package():
         print("Copying icon...")
         shutil.copy2(icon_path, build_dir / "icon.png")
 
+    # Determine platform-specific command and args
+    system = platform.system()
+    exe_name = f"{project_name}.exe" if system == "Windows" else project_name
+    
+    if system == "Windows":
+        entry_point = exe_name
+        mcp_command = f"${{__dirname}}/{exe_name}"
+        mcp_args = []
+    else: # macOS and Linux
+        entry_point = exe_name
+        mcp_command = "/bin/bash"
+        mcp_args = ["-c", f'"${{__dirname}}/{exe_name}"']
+
     # Create simplified manifest
     manifest = {
         "dxt_version": "0.1",
@@ -115,8 +129,10 @@ def prepare_dxt_package():
         "keywords": ["time", "ntp", "mcp", "server", "utility"],
         "server": {
             "type": "binary",
+            "entry_point": entry_point,
             "mcp_config": {
-                "command": f"${{__dirname}}/{exe_name}"
+                "command": mcp_command,
+                "args": mcp_args,
             }
         },
         "tools": [
