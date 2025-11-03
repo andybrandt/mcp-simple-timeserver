@@ -5,6 +5,10 @@
 
 *One of the strange design decisions Anthropic made was depriving Claude of timestamps for messages sent by the user or current time in general. Poor Claude can't tell what time it is! `mcp-simple-timeserver` is a simple MCP server that fixes that.*
 
+<a href="https://glama.ai/mcp/servers/@andybrandt/mcp-simple-timeserver">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@andybrandt/mcp-simple-timeserver/badge" alt="Simple Timeserver MCP server" />
+</a>
+
 This server provides two tools:
  - `get_local_time` provides the current local time and timezone information from the user's machine. This way Claude can know what time it is at the user's location. He can also calculate how much time passed since his last interaction with the user should he want to do so. 
  - `get_utc` provides current UTC time obtained from an [NTP time server](https://en.wikipedia.org/wiki/Network_Time_Protocol). 
@@ -58,4 +62,3 @@ Typical configuration would look like this:
 This project also includes a network-hostable version that can be deployed as a standalone web server. For instructions on how to run and deploy it, please see the [Web Server Deployment Guide](WEB_DEPLOYMENT.md).
 
 Or you can simply use my server by adding it under https://mcp.andybrandt.net/timeserver to Claude. (*It does not work with ChatGPT since it currently works only with MCP servers that implement `search()` and `fetch()` tools to serve data in response to LLM's querries*).
-
