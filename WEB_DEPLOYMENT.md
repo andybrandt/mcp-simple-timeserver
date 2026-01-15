@@ -4,9 +4,20 @@ This guide explains how to run the network-hostable version of the `mcp-simple-t
 
 ## Overview
 
-The web server is a stateless service that exposes two tools:
--   `get_server_time`: Returns the local time of the server machine.
--   `get_utc`: Returns the current UTC time from an NTP server.
+The web server is a stateless service that exposes 8 tools:
+
+| Tool | Description |
+|------|-------------|
+| `get_server_time` | Returns the local time and timezone of the server machine |
+| `get_utc` | Returns accurate UTC time from an NTP server |
+| `get_iso_week_date` | Returns the current date in ISO 8601 week date format |
+| `get_unix_timestamp` | Returns the current Unix/POSIX timestamp |
+| `get_hijri_date` | Returns the current date and time in the Islamic (Hijri) calendar |
+| `get_japanese_era_date` | Returns the current date and time in Japanese Era calendar (supports "en" or "ja") |
+| `get_hebrew_date` | Returns the current date and time in Hebrew calendar (supports "en" or "he") |
+| `get_persian_date` | Returns the current date and time in Persian/Jalali calendar (supports "en" or "fa") |
+
+All tools (except `get_server_time`) use accurate time from NTP servers with graceful fallback to local time.
 
 It runs using FastMCP's built-in web server (based on Uvicorn/Starlette).
 
@@ -36,20 +47,36 @@ This will start the server on `http://0.0.0.0:8000`.
 
 You can test the running server from your command line using `curl`.
 
-**Initialize Request:**
+**List Tools Request:**
 ```bash
-curl -X POST http://127.0.0.1:8000/mcp/ \
+curl -X POST http://127.0.0.1:8000/mcp \
 -H "Content-Type: application/json" \
 -H "Accept: application/json, text/event-stream" \
--d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test-client","version":"1.0"},"capabilities":{}}}'
+-d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 **Tool Call Request (`get_server_time`):**
 ```bash
-curl -X POST http://127.0.0.1:8000/mcp/ \
+curl -X POST http://127.0.0.1:8000/mcp \
 -H "Content-Type: application/json" \
 -H "Accept: application/json, text/event-stream" \
 -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_server_time","arguments":{}}}'
+```
+
+**Tool Call Request (`get_hijri_date`):**
+```bash
+curl -X POST http://127.0.0.1:8000/mcp \
+-H "Content-Type: application/json" \
+-H "Accept: application/json, text/event-stream" \
+-d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_hijri_date","arguments":{}}}'
+```
+
+**Tool Call Request (`get_persian_date` with Farsi output):**
+```bash
+curl -X POST http://127.0.0.1:8000/mcp \
+-H "Content-Type: application/json" \
+-H "Accept: application/json, text/event-stream" \
+-d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_persian_date","arguments":{"language":"fa"}}}'
 ```
 
 ## Docker Deployment
@@ -103,9 +130,9 @@ docker run -d --restart always -p 127.0.0.1:8001:8000 --name timeserver-web mcp-
 
 ## Apache Reverse Proxy Configuration
 
-*Important: Trailing Slash Handling*
+*Important: FastMCP 2.x URL Path*
 
-MCP clients may request URLs with or without trailing slashes. Your Apache configuration must handle both cases to avoid 404 errors.
+FastMCP 2.x expects requests at `/mcp` (without trailing slash). Requests to `/mcp/` will receive a 307 redirect. Configure your proxy accordingly.
 
 ### Example Configuration
 
@@ -118,10 +145,10 @@ MCP clients may request URLs with or without trailing slashes. Your Apache confi
     # SSLCertificateFile /path/to/cert.pem
     # SSLCertificateKeyFile /path/to/key.pem
     
-    # Main proxy configuration 
+    # Main proxy configuration - note: NO trailing slash on /mcp
     <Location /timeserver>
-        ProxyPass http://127.0.0.1:8001/mcp/
-        ProxyPassReverse http://127.0.0.1:8001/mcp/
+        ProxyPass http://127.0.0.1:8001/mcp
+        ProxyPassReverse http://127.0.0.1:8001/mcp
         
         # Important headers
         ProxyPreserveHost On
