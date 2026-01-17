@@ -61,36 +61,63 @@ def get_utc(server: str = DEFAULT_NTP_SERVER) -> str:
 
 @app.tool(
     annotations={
-        "title": "Get Current Time with Optional Calendar Systems and Formats",
+        "title": "Get Current Time with Optional Location and Calendar Systems",
         "readOnlyHint": True
     }
 )
-def get_current_time(calendar: str = "") -> str:
+def get_current_time(
+    calendar: str = "",
+    timezone: str = "",
+    country: str = "",
+    city: str = ""
+) -> str:
     """
-    Returns the current UTC time with Gregorian date, and optionally converts to
-    additional calendar systems or formats.
+    Returns current time, optionally localized to a specific location or timezone,
+    with optional conversion to additional calendar systems.
 
-    The response ALWAYS includes:
-    - UTC time (YYYY-MM-DD HH:MM:SS format)
-    - Gregorian date with day of week
-    - Timezone name (currently always "UTC")
+    LOCATION PARAMETERS (use one, priority: timezone > city > country):
 
-    :param calendar: Comma-separated list of additional calendars/formats to include.
+    :param city: City name (PRIMARY USE CASE). Examples: "Warsaw", "Tokyo", "New York"
+        Resolves city to timezone automatically. Best for most queries.
+
+    :param country: Country name or code. Examples: "Poland", "JP", "United States"
+        Falls back to capital/major city timezone. Use when city is unknown.
+
+    :param timezone: Direct IANA timezone or UTC offset. Examples: "Europe/Warsaw", "+05:30"
+        Escape hatch for precise control. Use when you know the exact timezone.
+
+    When a location is provided, the response includes:
+    - Local time at that location
+    - Timezone name and abbreviation (e.g., "Europe/Warsaw (CET)")
+    - UTC offset (e.g., "+01:00")
+    - DST status (Yes/No)
+    - UTC time for reference
+
+    When NO location is provided, returns UTC time only (original behavior).
+
+    CALENDAR PARAMETER:
+
+    :param calendar: Comma-separated list of additional calendars/formats.
         Valid values (case-insensitive):
         - "unix" - Unix timestamp (seconds since 1970-01-01)
         - "isodate" - ISO 8601 week date (YYYY-Www-D)
         - "hijri" - Islamic/Hijri lunar calendar
-        - "japanese" - Japanese Era calendar (returns BOTH English and Kanji)
-        - "persian" - Persian/Jalali calendar (returns BOTH English and Farsi)
-        - "hebrew" - Hebrew/Jewish calendar (returns BOTH English and Hebrew script)
+        - "japanese" - Japanese Era calendar (English and Kanji)
+        - "persian" - Persian/Jalali calendar (English and Farsi)
+        - "hebrew" - Hebrew/Jewish calendar (English and Hebrew script)
 
-        Example: "unix,hijri" returns UTC time plus Unix timestamp and Hijri date.
-        Leave empty to get only UTC/Gregorian time.
-        Invalid calendar names are reported but do not cause errors.
+        Calendars are calculated for the LOCAL time when location is specified.
+
+    EXAMPLES:
+    - get_current_time(city="Warsaw") - Time in Warsaw with timezone info
+    - get_current_time(city="Tokyo", calendar="japanese") - Tokyo time with Japanese calendar
+    - get_current_time(timezone="+05:30") - Time at UTC+5:30 offset
+    - get_current_time() - UTC time only (no location)
 
     Uses accurate time from NTP server when available.
+    Invalid locations fall back to UTC with a helpful message.
     """
-    return current_time_result(calendar)
+    return current_time_result(calendar, timezone, country, city)
 
 
 if __name__ == "__main__":

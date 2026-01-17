@@ -169,6 +169,16 @@ def main():
         ("get_current_time", {"calendar": "persian"}, "Get current time with Persian calendar", 90),
         ("get_current_time", {"calendar": "unix,hijri,japanese"}, "Get current time with multiple calendars", 100),
         ("get_current_time", {"calendar": "unix,invalid,hebrew"}, "Get current time with invalid calendar (graceful)", 110),
+
+        # get_current_time with location parameters
+        ("get_current_time", {"city": "Warsaw"}, "Get time in Warsaw (city lookup)", 120),
+        ("get_current_time", {"city": "Tokyo"}, "Get time in Tokyo (city lookup)", 130),
+        ("get_current_time", {"country": "Poland"}, "Get time in Poland (country lookup)", 140),
+        ("get_current_time", {"timezone": "America/New_York"}, "Get time with IANA timezone", 150),
+        ("get_current_time", {"timezone": "+05:30"}, "Get time with UTC offset (+05:30)", 160),
+        ("get_current_time", {"city": "Gotham"}, "Get time in invalid city (graceful fallback)", 170),
+        ("get_current_time", {"city": "Tokyo", "calendar": "japanese"}, "Get Tokyo time with Japanese calendar", 180),
+        ("get_current_time", {"timezone": "InvalidTZ"}, "Get time with invalid timezone (graceful fallback)", 190),
     ]
 
     passed = 0
