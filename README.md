@@ -14,12 +14,22 @@ This server provides the following tools:
 |------|-------------|
 | `get_local_time` | Returns the current local time, day of week, and timezone from the user's machine |
 | `get_utc` | Returns accurate UTC time from an [NTP time server](https://en.wikipedia.org/wiki/Network_Time_Protocol) |
-| `get_iso_week_date` | Returns the current date in ISO 8601 week date format (e.g., `2026-W03-4`) |
-| `get_unix_timestamp` | Returns the current Unix/POSIX timestamp |
-| `get_hijri_date` | Returns the current date and time in the Islamic (Hijri) lunar calendar |
-| `get_japanese_era_date` | Returns the current date and time in the Japanese Era (Nengo) calendar. Supports English and Kanji output via `language` parameter ("en" or "ja") |
-| `get_hebrew_date` | Returns the current date and time in the Hebrew (Jewish) calendar, including holiday information. Supports English and Hebrew output via `language` parameter ("en" or "he") |
-| `get_persian_date` | Returns the current date and time in the Persian (Jalali/Shamsi) calendar. Supports English and Farsi output via `language` parameter ("en" or "fa") |
+| `get_current_time` | Returns current UTC time with optional calendar conversions (see below) |
+
+### Calendar Support via `get_current_time`
+
+The `get_current_time` tool accepts an optional `calendar` parameter with a comma-separated list of calendar formats:
+
+| Calendar | Description |
+|----------|-------------|
+| `unix` | Unix timestamp (seconds since 1970-01-01) |
+| `isodate` | ISO 8601 week date (e.g., `2026-W03-6`) |
+| `hijri` | Islamic/Hijri lunar calendar |
+| `japanese` | Japanese Era calendar (returns both English and Kanji) |
+| `hebrew` | Hebrew/Jewish calendar (returns both English and Hebrew, includes holidays) |
+| `persian` | Persian/Jalali calendar (returns both English and Farsi) |
+
+Example: `get_current_time(calendar="unix,hijri")` returns UTC time plus Unix timestamp and Hijri date.
 
 All tools (except `get_local_time`) use accurate time from NTP servers. If NTP is unavailable, they gracefully fall back to local server time with a notice.
 

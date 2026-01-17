@@ -16,14 +16,14 @@ def call_server(requests: list[dict], expected_responses: int = 2) -> list[dict]
     """
     import os
     import select
-    
+
     # Build the input as newline-delimited JSON
     input_data = "\n".join(json.dumps(req) for req in requests) + "\n"
-    
+
     # Set environment to ensure unbuffered output
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
-    
+
     # Run the server
     process = subprocess.Popen(
         [sys.executable, "-u", "-m", "mcp_simple_timeserver"],
@@ -33,17 +33,17 @@ def call_server(requests: list[dict], expected_responses: int = 2) -> list[dict]
         text=True,
         env=env
     )
-    
+
     # Write all input
     process.stdin.write(input_data)
     process.stdin.flush()
-    
+
     # Read responses until we have enough or timeout
     responses = []
     import time
     start_time = time.time()
     timeout = 10  # seconds
-    
+
     while len(responses) < expected_responses and (time.time() - start_time) < timeout:
         # Check if there's data to read (with a short timeout)
         if select.select([process.stdout], [], [], 0.1)[0]:
@@ -56,12 +56,12 @@ def call_server(requests: list[dict], expected_responses: int = 2) -> list[dict]
                     responses.append(json.loads(line))
                 except json.JSONDecodeError:
                     pass
-    
+
     # Clean up
     process.stdin.close()
     process.terminate()
     process.wait(timeout=2)
-    
+
     return responses
 
 
@@ -101,16 +101,16 @@ def call_tool(tool_name: str, arguments: dict, request_id: int) -> str | None:
             }
         }
     ]
-    
+
     responses = call_server(requests)
-    
+
     # Find the response with our request ID
     for response in responses:
         if response.get("id") == request_id and "result" in response:
             content = response["result"].get("content", [])
             if content and "text" in content[0]:
                 return content[0]["text"]
-    
+
     return None
 
 
@@ -123,14 +123,14 @@ def list_tools() -> int | None:
             "method": "tools/list"
         }
     ]
-    
+
     responses = call_server(requests)
-    
+
     for response in responses:
         if response.get("id") == 100 and "result" in response:
             tools = response["result"].get("tools", [])
             return len(tools)
-    
+
     return None
 
 
@@ -140,41 +140,46 @@ def main():
     print("  MCP Simple Timeserver - Tool Tests")
     print("=" * 50)
     print()
-    
+
     # Test tools/list
     print("Testing: tools/list")
     print("  Listing all available tools...")
     tool_count = list_tools()
     if tool_count is not None:
         print(f"  Result: Found {tool_count} tools")
+        if tool_count != 3:
+            print(f"  WARNING: Expected 3 tools, got {tool_count}")
     else:
         print("  ERROR: Could not list tools")
     print()
-    
+
     # Define tests: (tool_name, arguments, description, request_id)
     tests = [
+        # Basic tools
         ("get_local_time", {}, "Get local time and timezone", 10),
         ("get_utc", {}, "Get UTC time from NTP server", 20),
-        ("get_iso_week_date", {}, "Get ISO 8601 week date", 30),
-        ("get_unix_timestamp", {}, "Get Unix/POSIX timestamp", 40),
-        ("get_hijri_date", {}, "Get Islamic (Hijri) calendar date", 50),
-        ("get_japanese_era_date", {"language": "en"}, "Get Japanese Era date (English)", 60),
-        ("get_japanese_era_date", {"language": "ja"}, "Get Japanese Era date (Kanji)", 70),
-        ("get_hebrew_date", {"language": "en"}, "Get Hebrew calendar date (English)", 80),
-        ("get_hebrew_date", {"language": "he"}, "Get Hebrew calendar date (Hebrew)", 90),
-        ("get_persian_date", {"language": "en"}, "Get Persian calendar date (English)", 100),
-        ("get_persian_date", {"language": "fa"}, "Get Persian calendar date (Farsi)", 110),
+
+        # get_current_time with various calendar options
+        ("get_current_time", {}, "Get current time (default, no calendars)", 30),
+        ("get_current_time", {"calendar": "unix"}, "Get current time with Unix timestamp", 40),
+        ("get_current_time", {"calendar": "isodate"}, "Get current time with ISO week date", 50),
+        ("get_current_time", {"calendar": "hijri"}, "Get current time with Hijri calendar", 60),
+        ("get_current_time", {"calendar": "japanese"}, "Get current time with Japanese calendar", 70),
+        ("get_current_time", {"calendar": "hebrew"}, "Get current time with Hebrew calendar", 80),
+        ("get_current_time", {"calendar": "persian"}, "Get current time with Persian calendar", 90),
+        ("get_current_time", {"calendar": "unix,hijri,japanese"}, "Get current time with multiple calendars", 100),
+        ("get_current_time", {"calendar": "unix,invalid,hebrew"}, "Get current time with invalid calendar (graceful)", 110),
     ]
-    
+
     passed = 0
     failed = 0
-    
+
     for tool_name, arguments, description, request_id in tests:
         print(f"Testing: {tool_name}")
         print(f"  {description}")
-        
+
         result = call_tool(tool_name, arguments, request_id)
-        
+
         if result is not None:
             print("  Result:")
             for line in result.split("\n"):
@@ -184,11 +189,11 @@ def main():
             print("  ERROR: No response received")
             failed += 1
         print()
-    
+
     print("=" * 50)
     print(f"  Tests completed: {passed} passed, {failed} failed")
     print("=" * 50)
-    
+
     return 0 if failed == 0 else 1
 
 
