@@ -5,6 +5,8 @@ This server provides time-related tools to AI assistants via the
 Model Context Protocol (MCP) using stdio transport.
 """
 from datetime import datetime
+from importlib.metadata import version
+
 from fastmcp import FastMCP
 
 from .core import (
@@ -14,7 +16,10 @@ from .core import (
 )
 
 
-app = FastMCP("mcp-simple-timeserver")
+# Get package version dynamically from pyproject.toml via importlib.metadata
+_version = version("mcp-simple-timeserver")
+
+app = FastMCP("mcp-simple-timeserver", version=_version)
 
 
 # Note: in this context the docstrings are meant for the client AI

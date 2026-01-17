@@ -6,6 +6,8 @@ Model Context Protocol (MCP) using streamable HTTP transport.
 Designed for network deployment behind a reverse proxy.
 """
 from datetime import datetime
+from importlib.metadata import version
+
 from fastmcp import FastMCP
 
 from ..core import (
@@ -15,9 +17,13 @@ from ..core import (
 )
 
 
+# Get package version dynamically from pyproject.toml via importlib.metadata
+_version = version("mcp-simple-timeserver")
+
 # Create the FastMCP app with web-specific settings
 app = FastMCP(
     "mcp-simple-timeserver",
+    version=_version,
     stateless_http=True,
     host="0.0.0.0",  # Listen on all interfaces inside the container
     port=8000,

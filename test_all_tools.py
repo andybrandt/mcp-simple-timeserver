@@ -134,11 +134,60 @@ def list_tools() -> int | None:
     return None
 
 
+def check_server_version() -> tuple[str | None, str | None]:
+    """
+    Check server version from initialize response.
+    Returns tuple of (reported_version, expected_version) or (None, expected) if failed.
+    """
+    from importlib.metadata import version as get_version
+
+    expected_version = get_version("mcp-simple-timeserver")
+
+    # Just send initialize request (no notification needed for this check)
+    requests = [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "clientInfo": {"name": "test-client", "version": "1.0"},
+                "capabilities": {}
+            }
+        }
+    ]
+
+    responses = call_server(requests, expected_responses=1)
+
+    for response in responses:
+        if response.get("id") == 1 and "result" in response:
+            server_info = response["result"].get("serverInfo", {})
+            reported_version = server_info.get("version")
+            return (reported_version, expected_version)
+
+    return (None, expected_version)
+
+
 def main():
     """Run all tests."""
     print("=" * 50)
     print("  MCP Simple Timeserver - Tool Tests")
     print("=" * 50)
+    print()
+
+    # Test server version
+    print("Testing: server version")
+    print("  Checking version reported in initialize response...")
+    reported_ver, expected_ver = check_server_version()
+    if reported_ver is not None:
+        if reported_ver == expected_ver:
+            print(f"  Result: Version {reported_ver} (matches pyproject.toml)")
+        else:
+            print(f"  ERROR: Version mismatch!")
+            print(f"    Reported: {reported_ver}")
+            print(f"    Expected: {expected_ver}")
+    else:
+        print("  ERROR: Could not get server version from initialize response")
     print()
 
     # Test tools/list
