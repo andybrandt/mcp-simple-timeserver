@@ -1,129 +1,27 @@
-from datetime import date, datetime, UTC
-import ntplib
-from fastmcp import FastMCP  # FastMCP 2.0 import
-from hijridate import Gregorian
-from japanera import EraDateTime
-from pyluach import dates as hebrew_dates
-from persiantools.jdatetime import JalaliDateTime
+"""
+MCP Simple Timeserver - Local (stdio) variant.
 
-# Default NTP server
-DEFAULT_NTP_SERVER = 'pool.ntp.org'
+This server provides time-related tools to AI assistants via the
+Model Context Protocol (MCP) using stdio transport.
+"""
+from datetime import datetime
+from fastmcp import FastMCP
+
+from .core import (
+    DEFAULT_NTP_SERVER,
+    utc_time_result,
+    current_time_result,
+)
+
 
 app = FastMCP("mcp-simple-timeserver")
 
 
-def _get_ntp_datetime(server: str = DEFAULT_NTP_SERVER) -> tuple[datetime, bool]:
-    """
-    Fetches accurate UTC time from an NTP server.
-    Returns a tuple of (datetime, is_ntp_time).
-    If NTP fails, falls back to local time with is_ntp_time=False.
-    """
-    try:
-        ntp_client = ntplib.NTPClient()
-        response = ntp_client.request(server, version=3)
-        return datetime.fromtimestamp(response.tx_time, tz=UTC), True
-    except (ntplib.NTPException, OSError):
-        # Catches NTP errors, socket timeouts, and network errors
-        return datetime.now(tz=UTC), False
-
-
-# Helper functions for calendar formatting in get_current_time tool
-
-def _format_unix(ntp_time: datetime) -> str:
-    """Format time as Unix timestamp."""
-    timestamp = int(ntp_time.timestamp())
-    return f"--- Unix Timestamp ---\n{timestamp}"
-
-
-def _format_isodate(ntp_time: datetime) -> str:
-    """Format time as ISO 8601 week date."""
-    iso_week_date = ntp_time.strftime("%G-W%V-%u")
-    return f"--- ISO Week Date ---\n{iso_week_date}"
-
-
-def _calendar_hijri(ntp_time: datetime) -> str:
-    """Format time in Hijri (Islamic) calendar."""
-    hijri = Gregorian.fromdate(ntp_time.date()).to_hijri()
-    hijri_formatted = hijri.isoformat()
-    month_name = hijri.month_name()
-    day_name = hijri.day_name()
-    notation = hijri.notation()
-    return (
-        f"--- Hijri Calendar ---\n"
-        f"Date: {hijri_formatted} {notation}\n"
-        f"Month: {month_name}\n"
-        f"Day: {day_name}"
-    )
-
-
-def _calendar_japanese(ntp_time: datetime) -> str:
-    """Format time in Japanese Era calendar (both English and Kanji)."""
-    era_datetime = EraDateTime.from_datetime(ntp_time)
-    # English format: Reiwa 7, January 15, 14:00
-    english_formatted = era_datetime.strftime("%-E %-Y, %B %d, %H:%M")
-    # Kanji format: 令和7年01月15日 14時
-    kanji_formatted = era_datetime.strftime("%-K%-y年%m月%d日 %H時")
-    era_english = era_datetime.era.english
-    era_kanji = era_datetime.era.kanji
-    return (
-        f"--- Japanese Calendar ---\n"
-        f"English: {english_formatted}\n"
-        f"Kanji: {kanji_formatted}\n"
-        f"Era: {era_english} ({era_kanji})"
-    )
-
-
-def _calendar_persian(ntp_time: datetime) -> str:
-    """Format time in Persian (Jalali) calendar (both English and Farsi)."""
-    jalali_dt = JalaliDateTime(ntp_time)
-    english_formatted = jalali_dt.strftime("%A %d %B %Y", locale="en")
-    farsi_formatted = jalali_dt.strftime("%A %d %B %Y", locale="fa")
-    return (
-        f"--- Persian Calendar ---\n"
-        f"English: {english_formatted}\n"
-        f"Farsi: {farsi_formatted}"
-    )
-
-
-def _calendar_hebrew(ntp_time: datetime) -> str:
-    """Format time in Hebrew (Jewish) calendar (both English and Hebrew)."""
-    gregorian_date = hebrew_dates.GregorianDate(
-        ntp_time.year, ntp_time.month, ntp_time.day
-    )
-    hebrew_date = gregorian_date.to_heb()
-    english_formatted = f"{hebrew_date.day} {hebrew_date.month_name()} {hebrew_date.year}"
-    hebrew_formatted = hebrew_date.hebrew_date_string()
-
-    # Check for holiday in both languages
-    holiday_en = hebrew_date.holiday(hebrew=False)
-    holiday_he = hebrew_date.holiday(hebrew=True)
-    holiday_line = ""
-    if holiday_en:
-        holiday_line = f"\nHoliday: {holiday_en} ({holiday_he})"
-
-    return (
-        f"--- Hebrew Calendar ---\n"
-        f"English: {english_formatted}\n"
-        f"Hebrew: {hebrew_formatted}"
-        f"{holiday_line}"
-    )
-
-
-# Mapping of calendar names to their formatting functions
-CALENDAR_FORMATTERS = {
-    "unix": _format_unix,
-    "isodate": _format_isodate,
-    "hijri": _calendar_hijri,
-    "japanese": _calendar_japanese,
-    "persian": _calendar_persian,
-    "hebrew": _calendar_hebrew,
-}
-
-
-# Note: in this context the docstring are meant for the client AI to understand the tools and their purpose.
+# Note: in this context the docstrings are meant for the client AI
+# to understand the tools and their purpose.
 
 @app.tool(
-    annotations = {
+    annotations={
         "title": "Get Local Time and Timezone",
         "readOnlyHint": True
     }
@@ -139,6 +37,7 @@ def get_local_time() -> str:
     day_of_week = local_time.strftime("%A")
     return f"Current Time: {formatted_time}\nDay: {day_of_week}\nTimezone: {timezone}"
 
+
 @app.tool(
     annotations={
         "title": "Get UTC Time from an NTP Server",
@@ -149,14 +48,10 @@ def get_utc(server: str = DEFAULT_NTP_SERVER) -> str:
     """
     Returns accurate UTC time from an NTP server.
     This provides a universal time reference regardless of local timezone.
-    
+
     :param server: NTP server address (default: pool.ntp.org)
     """
-    utc_time, is_ntp = _get_ntp_datetime(server)
-    formatted_time = utc_time.strftime("%Y-%m-%d %H:%M:%S")
-    day_of_week = utc_time.strftime("%A")
-    fallback_notice = "" if is_ntp else "\n(Note: NTP unavailable, using local server time)"
-    return f"Current UTC Time from {server}: {formatted_time}\nDay: {day_of_week}{fallback_notice}"
+    return utc_time_result(server)
 
 
 @app.tool(
@@ -190,48 +85,7 @@ def get_current_time(calendar: str = "") -> str:
 
     Uses accurate time from NTP server when available.
     """
-    ntp_time, is_ntp = _get_ntp_datetime()
-    formatted_time = ntp_time.strftime("%Y-%m-%d %H:%M:%S")
-    day_of_week = ntp_time.strftime("%A")
-    gregorian_date = ntp_time.strftime("%Y-%m-%d")
-
-    # Build base response
-    result_lines = [
-        f"UTC Time: {formatted_time}",
-        f"Day: {day_of_week}",
-    ]
-
-    # Process requested calendars if any
-    warnings = []
-    calendar_sections = []
-
-    if calendar.strip():
-        # Add the Gregorian date line when calendars are requested
-        result_lines.append(f"Date: {gregorian_date} (Gregorian)")
-
-        requested = [c.strip().lower() for c in calendar.split(",")]
-        for cal_name in requested:
-            if not cal_name:
-                continue
-            if cal_name in CALENDAR_FORMATTERS:
-                calendar_sections.append(CALENDAR_FORMATTERS[cal_name](ntp_time))
-            else:
-                warnings.append(f"(Note: Unknown calendar format ignored: {cal_name})")
-
-    # Build final result
-    result = "\n".join(result_lines)
-
-    if calendar_sections:
-        result += "\n\n" + "\n\n".join(calendar_sections)
-
-    if warnings:
-        result += "\n\n" + "\n".join(warnings)
-
-    # Add fallback notice if NTP was unavailable
-    if not is_ntp:
-        result += "\n(Note: NTP unavailable, using local server time)"
-
-    return result
+    return current_time_result(calendar)
 
 
 if __name__ == "__main__":
