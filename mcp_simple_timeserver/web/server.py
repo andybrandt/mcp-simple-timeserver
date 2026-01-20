@@ -21,12 +21,12 @@ from ..core import (
 _version = version("mcp-simple-timeserver")
 
 # Create the FastMCP app with web-specific settings
+# Note: host and port moved to run() per FastMCP 2.x deprecation.
+# stateless_http remains here as run() doesn't support it yet (see FastMCP issue #996).
 app = FastMCP(
     "mcp-simple-timeserver",
     version=_version,
     stateless_http=True,
-    host="0.0.0.0",  # Listen on all interfaces inside the container
-    port=8000,
     auth=None  # Explicitly disable authentication
 )
 
@@ -128,4 +128,5 @@ def get_current_time(
 
 if __name__ == "__main__":
     # Run the server with streamable-http transport
-    app.run(transport="streamable-http")
+    # Host 0.0.0.0 to listen on all interfaces inside the container
+    app.run(transport="streamable-http", host="0.0.0.0", port=8000)
