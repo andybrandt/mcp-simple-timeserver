@@ -545,3 +545,257 @@ def current_time_result(
         result_parts.append("(Note: NTP unavailable, using local server time)")
 
     return "\n".join(result_parts)
+
+
+# Time distance calculation functions
+
+def parse_date_input(
+    date_str: str,
+    tz_obj: Optional[ZoneInfo],
+    ntp_time: Optional[datetime] = None
+) -> datetime:
+    """
+    Parse a date/datetime string into a timezone-aware datetime object.
+
+    Supports:
+    - "now" - Returns current NTP time (converted to timezone if provided)
+    - "YYYY-MM-DD" - Date only (time set to midnight in the given timezone)
+    - "YYYY-MM-DDTHH:MM:SS" - Full datetime (assumed to be in given timezone)
+
+    :param date_str: The date string to parse.
+    :param tz_obj: Timezone to use for interpretation (None for UTC).
+    :param ntp_time: Current NTP time in UTC (required when date_str is "now").
+    :return: Timezone-aware datetime object.
+    :raises ValueError: If date string cannot be parsed.
+    """
+    date_str = date_str.strip().lower()
+
+    # Determine the effective timezone
+    effective_tz = tz_obj if tz_obj else timezone.utc
+
+    if date_str == "now":
+        if ntp_time is None:
+            raise ValueError('NTP time must be provided when parsing "now"')
+        # Return current time in the effective timezone
+        if tz_obj:
+            return ntp_time.astimezone(tz_obj)
+        return ntp_time
+
+    # Try to parse as ISO format
+    try:
+        # Check if it has a time component
+        has_time = "t" in date_str or " " in date_str
+
+        if has_time:
+            # Parse with time component
+            # Handle both 'T' separator and space separator
+            parsed = datetime.fromisoformat(date_str.replace(" ", "T"))
+        else:
+            # Parse date only, set time to midnight
+            parsed = datetime.fromisoformat(date_str)
+            parsed = datetime.combine(parsed.date(), datetime.min.time())
+
+        # Make timezone-aware if naive
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=effective_tz)
+
+        return parsed
+
+    except ValueError as e:
+        raise ValueError(
+            f'Could not parse date "{date_str}". '
+            'Use ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS) or "now".'
+        ) from e
+
+
+def format_duration_human(total_seconds: int) -> tuple[str, str]:
+    """
+    Format a duration in seconds into human-readable components.
+
+    :param total_seconds: Duration in seconds (uses absolute value).
+    :return: Tuple of (detailed breakdown, simplified summary).
+             Example: ("15 days, 3 hours, 45 minutes, 30 seconds", "2 weeks and 1 day")
+    """
+    # Work with absolute value for formatting
+    seconds = abs(total_seconds)
+
+    # Calculate all components
+    weeks, remainder = divmod(seconds, 7 * 24 * 3600)
+    days, remainder = divmod(remainder, 24 * 3600)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    # Build detailed breakdown (days, hours, minutes, seconds)
+    total_days = weeks * 7 + days
+    detail_parts = []
+    if total_days > 0:
+        detail_parts.append(f"{total_days} day{'s' if total_days != 1 else ''}")
+    if hours > 0:
+        detail_parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if minutes > 0:
+        detail_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    if secs > 0 or not detail_parts:
+        detail_parts.append(f"{secs} second{'s' if secs != 1 else ''}")
+
+    detailed = ", ".join(detail_parts)
+
+    # Build simplified summary (weeks and days only for longer durations)
+    summary_parts = []
+    if weeks > 0:
+        summary_parts.append(f"{weeks} week{'s' if weeks != 1 else ''}")
+    if days > 0:
+        summary_parts.append(f"{days} day{'s' if days != 1 else ''}")
+
+    if summary_parts:
+        simplified = " and ".join(summary_parts)
+    elif hours > 0:
+        simplified = f"{hours} hour{'s' if hours != 1 else ''}"
+    elif minutes > 0:
+        simplified = f"{minutes} minute{'s' if minutes != 1 else ''}"
+    else:
+        simplified = f"{secs} second{'s' if secs != 1 else ''}"
+
+    return detailed, simplified
+
+
+def format_duration_by_unit(total_seconds: int, unit: str) -> str:
+    """
+    Format duration as a single unit.
+
+    :param total_seconds: Duration in seconds (uses absolute value).
+    :param unit: One of "days", "weeks", "hours", "minutes", "seconds".
+    :return: Formatted string with the value in the specified unit.
+    """
+    seconds = abs(total_seconds)
+
+    if unit == "weeks":
+        value = seconds / (7 * 24 * 3600)
+        return f"{value:.2f} weeks"
+    elif unit == "days":
+        value = seconds / (24 * 3600)
+        return f"{value:.2f} days"
+    elif unit == "hours":
+        value = seconds / 3600
+        return f"{value:.2f} hours"
+    elif unit == "minutes":
+        value = seconds / 60
+        return f"{value:.2f} minutes"
+    else:  # seconds
+        return f"{seconds} seconds"
+
+
+def time_distance_result(
+    from_date: str = "now",
+    to_date: str = "now",
+    unit: str = "auto",
+    tz: str = "",
+    country: str = "",
+    city: str = ""
+) -> str:
+    """
+    Calculate the duration between two dates/datetimes.
+
+    :param from_date: Start date (ISO 8601 or "now").
+    :param to_date: End date (ISO 8601 or "now").
+    :param unit: Output unit - "auto", "days", "weeks", "hours", "minutes", "seconds".
+    :param tz: Direct timezone specification (IANA name or UTC offset).
+    :param country: Country name for timezone lookup.
+    :param city: City name for timezone lookup.
+    :return: Formatted result string with duration information.
+    """
+    # Normalize inputs
+    from_date = from_date.strip().lower() if from_date else "now"
+    to_date = to_date.strip().lower() if to_date else "now"
+
+    # Quick check: if both parameters are identical strings, return error immediately
+    # This handles both "now"/"now" case and identical explicit dates
+    if from_date == to_date:
+        return "Distance: 0 (same parameters, error?)"
+
+    # Resolve timezone if location parameters provided
+    tz_obj, location_name, location_warning = resolve_location(tz, country, city)
+
+    # Handle location resolution errors
+    result_lines = []
+    if location_warning:
+        result_lines.append(f"Note: {location_warning}")
+        result_lines.append("Using UTC for calculations.")
+        result_lines.append("")
+
+    # Determine if we need NTP time (only if exactly one param is "now")
+    from_is_now = from_date == "now"
+    to_is_now = to_date == "now"
+    ntp_time = None
+    is_ntp = True
+
+    if from_is_now or to_is_now:
+        ntp_time, is_ntp = get_ntp_datetime()
+
+    # Parse both dates
+    try:
+        from_dt = parse_date_input(from_date, tz_obj, ntp_time)
+    except ValueError as e:
+        return str(e)
+
+    try:
+        to_dt = parse_date_input(to_date, tz_obj, ntp_time)
+    except ValueError as e:
+        return str(e)
+
+    # Check if parsed datetimes are equal (handles different string formats resolving to same time)
+    if from_dt == to_dt:
+        return "Distance: 0 (same parameters, error?)"
+
+    # Calculate the difference
+    delta = to_dt - from_dt
+    total_seconds = int(delta.total_seconds())
+
+    # Determine direction
+    if total_seconds > 0:
+        direction = "future"
+    else:
+        direction = "past"
+
+    # Format duration based on unit
+    valid_units = ["auto", "days", "weeks", "hours", "minutes", "seconds"]
+    if unit.lower() not in valid_units:
+        unit = "auto"
+
+    if unit.lower() == "auto":
+        detailed, simplified = format_duration_human(total_seconds)
+        result_lines.append(f"Distance: {detailed}")
+        result_lines.append(f"Human readable: {simplified}")
+    else:
+        formatted_unit = format_duration_by_unit(total_seconds, unit.lower())
+        result_lines.append(f"Distance: {formatted_unit}")
+
+    result_lines.append(f"Direction: {direction}")
+
+    # Add date details section
+    result_lines.append("")
+
+    # Format the from/to dates for display
+    from_display = from_dt.strftime("%Y-%m-%d %H:%M:%S")
+    to_display = to_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    result_lines.append(f"From: {from_display}")
+    result_lines.append(f"To: {to_display}")
+
+    # Add location info if provided
+    if tz_obj and location_name:
+        result_lines.append(f"Location: {location_name}")
+
+    # Add UTC reference
+    result_lines.append("")
+    result_lines.append("UTC Reference:")
+    from_utc = from_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    to_utc = to_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    result_lines.append(f"  From: {from_utc} UTC")
+    result_lines.append(f"  To: {to_utc} UTC")
+
+    # Add NTP fallback notice if applicable
+    if (from_is_now or to_is_now) and not is_ntp:
+        result_lines.append("")
+        result_lines.append("(Note: NTP unavailable, using local server time)")
+
+    return "\n".join(result_lines)

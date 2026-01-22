@@ -13,6 +13,7 @@ from .core import (
     DEFAULT_NTP_SERVER,
     utc_time_result,
     current_time_result,
+    time_distance_result,
 )
 
 
@@ -118,6 +119,65 @@ def get_current_time(
     Invalid locations fall back to UTC with a helpful message.
     """
     return current_time_result(calendar, timezone, country, city)
+
+
+@app.tool(
+    annotations={
+        "title": "Calculate Time/Date Distance",
+        "readOnlyHint": True
+    }
+)
+def calculate_time_distance(
+    from_date: str = "now",
+    to_date: str = "now",
+    unit: str = "auto",
+    timezone: str = "",
+    city: str = "",
+    country: str = ""
+) -> str:
+    """
+    Calculate the duration/distance between two dates or datetimes.
+    Use this tool for countdowns, elapsed time calculations, or scheduling queries.
+
+    :param from_date: Start date in ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS) or "now".
+        Examples: "2025-01-15", "2025-01-15T09:30:00", "now"
+
+    :param to_date: End date in ISO 8601 format or "now".
+        Examples: "2025-12-31", "2025-06-01T17:00:00", "now"
+
+    :param unit: Output format for the distance. Options:
+        - "auto" (default) - Human-readable breakdown (e.g., "15 days, 3 hours, 45 minutes")
+        - "days" - Decimal days (e.g., "15.50 days")
+        - "weeks" - Decimal weeks (e.g., "2.21 weeks")
+        - "hours" - Decimal hours (e.g., "372.00 hours")
+        - "minutes" - Decimal minutes (e.g., "22320.00 minutes")
+        - "seconds" - Total seconds (e.g., "1339200 seconds")
+
+    LOCATION PARAMETERS (optional, same as get_current_time):
+
+    :param city: City name for timezone context. Examples: "Warsaw", "Tokyo", "New York"
+    :param country: Country name or code. Examples: "Poland", "JP"
+    :param timezone: Direct IANA timezone or UTC offset. Examples: "Europe/Warsaw", "+05:30"
+
+    Location affects how dates without explicit timezone are interpreted.
+    Priority: timezone > city > country. If none provided, UTC is used.
+
+    OUTPUT FORMAT:
+    - Distance: The calculated duration
+    - Human readable: Simplified summary (when unit="auto")
+    - Direction: "future" if to_date > from_date, "past" if to_date < from_date
+    - From/To: The parsed datetime values
+    - UTC Reference: Both times converted to UTC
+
+    COMMON USE CASES:
+    - "How many days until Dec 31?" → from_date="now", to_date="2025-12-31"
+    - "How long since Jan 1?" → from_date="2025-01-01", to_date="now"
+    - "Duration between two dates" → from_date="2025-01-01", to_date="2025-03-15"
+
+    NOTE: If both parameters are the same (e.g., both "now"), returns an error message.
+    Uses accurate NTP time when "now" is specified.
+    """
+    return time_distance_result(from_date, to_date, unit, timezone, country, city)
 
 
 if __name__ == "__main__":

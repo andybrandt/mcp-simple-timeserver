@@ -196,8 +196,8 @@ def main():
     tool_count = list_tools()
     if tool_count is not None:
         print(f"  Result: Found {tool_count} tools")
-        if tool_count != 3:
-            print(f"  WARNING: Expected 3 tools, got {tool_count}")
+        if tool_count != 4:
+            print(f"  WARNING: Expected 4 tools, got {tool_count}")
     else:
         print("  ERROR: Could not list tools")
     print()
@@ -228,6 +228,16 @@ def main():
         ("get_current_time", {"city": "Gotham"}, "Get time in invalid city (graceful fallback)", 170),
         ("get_current_time", {"city": "Tokyo", "calendar": "japanese"}, "Get Tokyo time with Japanese calendar", 180),
         ("get_current_time", {"timezone": "InvalidTZ"}, "Get time with invalid timezone (graceful fallback)", 190),
+
+        # calculate_time_distance tests
+        ("calculate_time_distance", {}, "Same params error (both default to now)", 200),
+        ("calculate_time_distance", {"from_date": "2025-01-01", "to_date": "2025-01-01"}, "Same params error (explicit)", 205),
+        ("calculate_time_distance", {"from_date": "2025-01-01", "to_date": "2025-01-15"}, "Basic date distance", 210),
+        ("calculate_time_distance", {"from_date": "now", "to_date": "2025-12-31"}, "Countdown to date", 220),
+        ("calculate_time_distance", {"from_date": "2025-01-01", "to_date": "2025-01-15", "unit": "weeks"}, "Distance in weeks", 230),
+        ("calculate_time_distance", {"from_date": "2025-01-15", "to_date": "2025-01-01"}, "Past direction", 240),
+        ("calculate_time_distance", {"from_date": "2025-01-01T09:00:00", "to_date": "2025-01-01T17:30:00"}, "Same day with time", 250),
+        ("calculate_time_distance", {"from_date": "now", "to_date": "2025-06-01", "city": "Warsaw"}, "With location", 260),
     ]
 
     passed = 0
