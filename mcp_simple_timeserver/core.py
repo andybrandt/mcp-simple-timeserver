@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import re
 
 import ntplib
+import pycountry
 import requests
 from hijridate import Gregorian
 from japanera import EraDateTime
@@ -28,6 +29,410 @@ DEFAULT_NTP_SERVER = 'pool.ntp.org'
 # Nominatim API configuration (OpenStreetMap geocoding service)
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_TIMEOUT = 5  # seconds
+
+# Holiday API configuration
+NAGER_API_URL = "https://date.nager.at/api/v3"
+NAGER_TIMEOUT = 5  # seconds
+OPENHOLIDAYS_API_URL = "https://openholidaysapi.org"
+OPENHOLIDAYS_TIMEOUT = 5  # seconds
+
+# Countries supported by OpenHolidaysAPI (for school holidays)
+# Source: https://openholidaysapi.org/Countries
+OPENHOLIDAYS_SUPPORTED_COUNTRIES = {
+    "AD", "AL", "AT", "BE", "BG", "BR", "BY", "CH", "CZ", "DE",
+    "EE", "ES", "FR", "HR", "HU", "IE", "IT", "LI", "LT", "LU",
+    "LV", "MC", "MD", "MT", "MX", "NL", "PL", "PT", "RO", "RS",
+    "SE", "SI", "SK", "SM", "VA", "ZA",
+}
+
+# Simple TTL cache for holiday data (24-hour TTL)
+# Keys: "public:{country}:{year}", "public_oh:{country}:{year}",
+#       "school:{country}:{year}", "subdivisions:{country}"
+_holiday_cache: dict[str, tuple[datetime, any]] = {}
+HOLIDAY_CACHE_TTL = timedelta(hours=24)
+
+
+def _get_cached(key: str) -> Optional[any]:
+    """
+    Get a value from the holiday cache if it exists and hasn't expired.
+
+    :param key: Cache key.
+    :return: Cached value or None if not found or expired.
+    """
+    if key in _holiday_cache:
+        cached_time, data = _holiday_cache[key]
+        if datetime.now(UTC) - cached_time < HOLIDAY_CACHE_TTL:
+            return data
+        # Expired - remove from cache
+        del _holiday_cache[key]
+    return None
+
+
+def _set_cached(key: str, data: any) -> None:
+    """
+    Store a value in the holiday cache with current timestamp.
+
+    :param key: Cache key.
+    :param data: Data to cache.
+    """
+    _holiday_cache[key] = (datetime.now(UTC), data)
+
+
+# Holiday API functions
+
+
+def fetch_public_holidays_nager(country_code: str, year: int) -> list[dict]:
+    """
+    Fetch public holidays from Nager.Date API.
+
+    :param country_code: ISO 3166-1 alpha-2 country code (e.g., "PL").
+    :param year: Year to fetch holidays for.
+    :return: List of holiday dicts with keys: date, name, local_name, types, regional_codes.
+             Returns empty list on error.
+    """
+    cache_key = f"public:{country_code}:{year}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    url = f"{NAGER_API_URL}/PublicHolidays/{year}/{country_code}"
+    headers = {"User-Agent": _get_user_agent()}
+
+    try:
+        response = requests.get(url, headers=headers, timeout=NAGER_TIMEOUT)
+        response.raise_for_status()
+        raw_holidays = response.json()
+
+        # Normalize the response to our internal format
+        holidays = []
+        for h in raw_holidays:
+            holidays.append({
+                "date": h.get("date", ""),
+                "name": h.get("name", ""),
+                "local_name": h.get("localName", ""),
+                "types": h.get("types", []),
+                "is_nationwide": h.get("global", True),
+                "regional_codes": h.get("counties") or [],
+            })
+
+        _set_cached(cache_key, holidays)
+        return holidays
+
+    except (requests.RequestException, ValueError, KeyError):
+        # Network errors, timeouts, invalid JSON, or missing fields
+        return []
+
+
+def fetch_subdivisions_openholidays(country_code: str) -> dict[str, str]:
+    """
+    Fetch subdivision code to name mapping from OpenHolidaysAPI.
+
+    This converts region codes like "PL-MZ" to human-readable names like "Mazowieckie".
+
+    :param country_code: ISO 3166-1 alpha-2 country code (e.g., "PL").
+    :return: Dict mapping subdivision codes to names (e.g., {"PL-MZ": "Mazowieckie"}).
+             Returns empty dict on error or if country not supported.
+    """
+    if country_code not in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+        return {}
+
+    cache_key = f"subdivisions:{country_code}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    url = f"{OPENHOLIDAYS_API_URL}/Subdivisions"
+    params = {"countryIsoCode": country_code}
+    headers = {"User-Agent": _get_user_agent()}
+
+    try:
+        response = requests.get(
+            url, params=params, headers=headers, timeout=OPENHOLIDAYS_TIMEOUT
+        )
+        response.raise_for_status()
+        raw_subdivisions = response.json()
+
+        # Build code → name mapping
+        # Prefer local name, fall back to English
+        subdivisions = {}
+        for sub in raw_subdivisions:
+            code = sub.get("code", "")
+            if not code:
+                continue
+
+            names = sub.get("name", [])
+            # Get English name first as fallback
+            en_name = ""
+            local_name = ""
+            for name_entry in names:
+                lang = name_entry.get("language", "")
+                text = name_entry.get("text", "")
+                if lang == "EN":
+                    en_name = text
+                elif lang == country_code[:2]:
+                    # Local language (e.g., "PL" for Poland)
+                    local_name = text
+
+            # Prefer local name, fallback to English, fallback to shortName
+            display_name = local_name or en_name or sub.get("shortName", code)
+            subdivisions[code] = display_name
+
+        _set_cached(cache_key, subdivisions)
+        return subdivisions
+
+    except (requests.RequestException, ValueError, KeyError):
+        return {}
+
+
+def fetch_school_holidays_openholidays(
+    country_code: str,
+    year: int
+) -> list[dict]:
+    """
+    Fetch school holidays from OpenHolidaysAPI.
+
+    School holidays have date ranges and may be regional (varying by subdivision).
+
+    :param country_code: ISO 3166-1 alpha-2 country code (e.g., "PL").
+    :param year: Year to fetch holidays for.
+    :return: List of school holiday dicts with keys: start_date, end_date, name,
+             is_nationwide, regions (list of human-readable region names).
+             Returns empty list on error or if country not supported.
+    """
+    if country_code not in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+        return []
+
+    cache_key = f"school:{country_code}:{year}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    # Get subdivision names for translating codes to names
+    subdivisions = fetch_subdivisions_openholidays(country_code)
+
+    url = f"{OPENHOLIDAYS_API_URL}/SchoolHolidays"
+    params = {
+        "countryIsoCode": country_code,
+        "languageIsoCode": "EN",
+        "validFrom": f"{year}-01-01",
+        "validTo": f"{year}-12-31",
+    }
+    headers = {"User-Agent": _get_user_agent()}
+
+    try:
+        response = requests.get(
+            url, params=params, headers=headers, timeout=OPENHOLIDAYS_TIMEOUT
+        )
+        response.raise_for_status()
+        raw_holidays = response.json()
+
+        # Normalize to our internal format
+        holidays = []
+        for h in raw_holidays:
+            # Get name (prefer English)
+            names = h.get("name", [])
+            name = ""
+            for name_entry in names:
+                if name_entry.get("language") == "EN":
+                    name = name_entry.get("text", "")
+                    break
+            if not name and names:
+                name = names[0].get("text", "Unknown")
+
+            # Convert subdivision codes to human-readable names
+            raw_subdivisions = h.get("subdivisions", [])
+            region_names = []
+            for sub in raw_subdivisions:
+                code = sub.get("code", "")
+                if code in subdivisions:
+                    region_names.append(subdivisions[code])
+                elif code:
+                    # Fallback to shortName if we don't have the mapping
+                    region_names.append(sub.get("shortName", code))
+
+            holidays.append({
+                "start_date": h.get("startDate", ""),
+                "end_date": h.get("endDate", ""),
+                "name": name,
+                "is_nationwide": h.get("nationwide", False),
+                "regions": region_names,
+            })
+
+        _set_cached(cache_key, holidays)
+        return holidays
+
+    except (requests.RequestException, ValueError, KeyError):
+        return []
+
+
+def fetch_public_holidays_openholidays(
+    country_code: str,
+    year: int
+) -> list[dict]:
+    """
+    Fetch public holidays from OpenHolidaysAPI (fallback for when Nager.Date fails).
+
+    :param country_code: ISO 3166-1 alpha-2 country code (e.g., "PL").
+    :param year: Year to fetch holidays for.
+    :return: List of holiday dicts with same format as fetch_public_holidays_nager.
+             Returns empty list on error or if country not supported.
+    """
+    if country_code not in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+        return []
+
+    cache_key = f"public_oh:{country_code}:{year}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    url = f"{OPENHOLIDAYS_API_URL}/PublicHolidays"
+    params = {
+        "countryIsoCode": country_code,
+        "languageIsoCode": "EN",
+        "validFrom": f"{year}-01-01",
+        "validTo": f"{year}-12-31",
+    }
+    headers = {"User-Agent": _get_user_agent()}
+
+    try:
+        response = requests.get(
+            url, params=params, headers=headers, timeout=OPENHOLIDAYS_TIMEOUT
+        )
+        response.raise_for_status()
+        raw_holidays = response.json()
+
+        # Normalize to same format as Nager
+        holidays = []
+        for h in raw_holidays:
+            # Get English name
+            names = h.get("name", [])
+            name = ""
+            for name_entry in names:
+                if name_entry.get("language") == "EN":
+                    name = name_entry.get("text", "")
+                    break
+            if not name and names:
+                name = names[0].get("text", "Unknown")
+
+            holidays.append({
+                "date": h.get("startDate", ""),
+                "name": name,
+                "local_name": name,  # OpenHolidays doesn't give local name separately
+                "types": [h.get("type", "Public")],
+                "is_nationwide": h.get("nationwide", True),
+                "regional_codes": [],
+            })
+
+        _set_cached(cache_key, holidays)
+        return holidays
+
+    except (requests.RequestException, ValueError, KeyError):
+        return []
+
+
+# Country code resolution
+
+
+def resolve_country_code(country: str) -> Optional[str]:
+    """
+    Resolve a country name or code to its ISO 3166-1 alpha-2 code.
+
+    Supports various input formats:
+    - Full names: "Poland", "United States", "Germany"
+    - Common names: "USA", "UK", "Great Britain"
+    - Alpha-2 codes: "PL", "US", "DE"
+    - Alpha-3 codes: "POL", "USA", "DEU"
+    - Local language names: "Deutschland", "Polska", "España"
+
+    :param country: Country name or code to resolve.
+    :return: ISO 3166-1 alpha-2 code (e.g., "PL") or None if not found.
+    """
+    country = country.strip()
+    if not country:
+        return None
+
+    # Common aliases that pycountry doesn't handle well
+    # (fuzzy search can match wrong countries for these)
+    COMMON_ALIASES = {
+        "uk": "GB",
+        "england": "GB",
+        "scotland": "GB",
+        "wales": "GB",
+        "britain": "GB",
+        "deutschland": "DE",
+        "polska": "PL",
+        "españa": "ES",
+        "espana": "ES",
+        "italia": "IT",
+        "france": "FR",
+        "nederland": "NL",
+        "holland": "NL",
+        "česko": "CZ",
+        "cesko": "CZ",
+        "czechia": "CZ",
+        "schweiz": "CH",
+        "suisse": "CH",
+        "svizzera": "CH",
+        "österreich": "AT",
+        "osterreich": "AT",
+    }
+
+    country_lower = country.lower()
+    if country_lower in COMMON_ALIASES:
+        return COMMON_ALIASES[country_lower]
+
+    # Try direct lookup by alpha-2 code (case-insensitive)
+    country_upper = country.upper()
+    if len(country_upper) == 2:
+        try:
+            result = pycountry.countries.get(alpha_2=country_upper)
+            if result:
+                return result.alpha_2
+        except (KeyError, LookupError):
+            pass
+
+    # Try direct lookup by alpha-3 code
+    if len(country_upper) == 3:
+        try:
+            result = pycountry.countries.get(alpha_3=country_upper)
+            if result:
+                return result.alpha_2
+        except (KeyError, LookupError):
+            pass
+
+    # Try lookup by name (exact match)
+    try:
+        result = pycountry.countries.get(name=country)
+        if result:
+            return result.alpha_2
+    except (KeyError, LookupError):
+        pass
+
+    # Try lookup by common name (e.g., "United States" vs "United States of America")
+    try:
+        result = pycountry.countries.get(common_name=country)
+        if result:
+            return result.alpha_2
+    except (KeyError, LookupError):
+        pass
+
+    # Try lookup by official name
+    try:
+        result = pycountry.countries.get(official_name=country)
+        if result:
+            return result.alpha_2
+    except (KeyError, LookupError):
+        pass
+
+    # Try fuzzy search as last resort
+    try:
+        results = pycountry.countries.search_fuzzy(country)
+        if results:
+            return results[0].alpha_2
+    except (LookupError, Exception):
+        pass
+
+    return None
 
 
 def _get_user_agent() -> str:
@@ -108,6 +513,107 @@ def geocode_location(query: str) -> Optional[tuple[float, float, str]]:
     except (requests.RequestException, ValueError, KeyError):
         # Network errors, timeouts, invalid JSON, or missing fields
         pass
+
+    return None
+
+
+def geocode_location_detailed(
+    query: str
+) -> Optional[tuple[str, Optional[str], str]]:
+    """
+    Resolve a location name to country and subdivision using Nominatim.
+
+    This is used for holiday lookups where we need both the country code
+    and the subdivision/region name for filtering regional holidays.
+
+    :param query: Location name (e.g., "Warsaw", "Krakow", "Berlin")
+    :return: Tuple of (country_code, subdivision_name, display_name) or None if not found.
+             country_code: ISO 3166-1 alpha-2 code (e.g., "PL", "DE")
+             subdivision_name: State/region/voivodeship name (e.g., "Mazowieckie", "Bayern")
+             display_name: Human-readable location name for display
+    """
+    headers = {"User-Agent": _get_user_agent()}
+    params = {
+        "q": query,
+        "format": "json",
+        "limit": 1,
+        "addressdetails": 1,  # Get structured address components
+    }
+
+    try:
+        response = requests.get(
+            NOMINATIM_URL,
+            params=params,
+            headers=headers,
+            timeout=NOMINATIM_TIMEOUT
+        )
+        response.raise_for_status()
+        results = response.json()
+
+        if results:
+            result = results[0]
+            address = result.get("address", {})
+
+            # Extract country code (Nominatim returns lowercase ISO code)
+            country_code = address.get("country_code", "").upper()
+            if not country_code:
+                return None
+
+            # Extract subdivision name from address components
+            # Nominatim uses different keys depending on the country
+            subdivision_name = None
+            for key in ["state", "region", "province", "county", "state_district"]:
+                if key in address:
+                    subdivision_name = address[key]
+                    break
+
+            # Build display name
+            display_name = result.get("display_name", query)
+            parts = display_name.split(", ")
+            if len(parts) > 2:
+                display_name = f"{parts[0]}, {parts[-1]}"
+
+            return (country_code, subdivision_name, display_name)
+
+    except (requests.RequestException, ValueError, KeyError):
+        pass
+
+    return None
+
+
+def find_subdivision_code(
+    country_code: str,
+    subdivision_name: str
+) -> Optional[str]:
+    """
+    Find the OpenHolidaysAPI subdivision code from a subdivision name.
+
+    This performs a reverse lookup: given "Mazowieckie" returns "PL-MZ".
+    Uses the subdivision mapping from OpenHolidaysAPI.
+
+    :param country_code: ISO 3166-1 alpha-2 country code (e.g., "PL").
+    :param subdivision_name: Subdivision name to find (e.g., "Mazowieckie").
+    :return: Subdivision code (e.g., "PL-MZ") or None if not found.
+    """
+    if country_code not in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+        return None
+
+    subdivisions = fetch_subdivisions_openholidays(country_code)
+    if not subdivisions:
+        return None
+
+    # Normalize the search name
+    search_name = subdivision_name.lower().strip()
+
+    # Try exact match first, then partial match
+    for code, name in subdivisions.items():
+        if name.lower() == search_name:
+            return code
+
+    # Try partial match (e.g., "Mazowieckie" might match "Województwo Mazowieckie")
+    for code, name in subdivisions.items():
+        if search_name in name.lower() or name.lower() in search_name:
+            return code
 
     return None
 
@@ -411,6 +917,32 @@ def _is_dst_active(dt: datetime) -> Optional[bool]:
     return dst.total_seconds() > 0
 
 
+def _extract_country_code_from_location(
+    country_param: str,
+    location_name: str
+) -> Optional[str]:
+    """
+    Try to extract country code from location parameters.
+
+    :param country_param: Direct country parameter if provided.
+    :param location_name: Location display name (e.g., "Warsaw, Poland").
+    :return: ISO country code or None if not determinable.
+    """
+    # If country parameter was provided, use it directly
+    if country_param.strip():
+        return resolve_country_code(country_param)
+
+    # Try to extract country from location_name (typically "City, Country" format)
+    if location_name:
+        parts = location_name.split(", ")
+        if len(parts) >= 2:
+            # Last part is typically the country
+            country_name = parts[-1].strip()
+            return resolve_country_code(country_name)
+
+    return None
+
+
 def current_time_result(
     calendar: str = "",
     tz: str = "",
@@ -487,6 +1019,27 @@ def current_time_result(
                 if dst_active is not None:
                     dst_text = "Yes" if dst_active else "No"
                     result_lines.append(f"DST Active: {dst_text}")
+
+            # Check if today is a public holiday
+            country_code = _extract_country_code_from_location(country, location_name)
+            if country_code:
+                today_str = display_time.strftime("%Y-%m-%d")
+                year = display_time.year
+                holidays = fetch_public_holidays_nager(country_code, year)
+                if not holidays and country_code in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+                    holidays = fetch_public_holidays_openholidays(country_code, year)
+
+                for h in holidays:
+                    if h.get("date") == today_str:
+                        name = h.get("name", "")
+                        local_name = h.get("local_name", "")
+                        if local_name and local_name != name:
+                            result_lines.append(
+                                f"Today is: {name} ({local_name}) - Public Holiday"
+                            )
+                        else:
+                            result_lines.append(f"Today is: {name} - Public Holiday")
+                        break
         else:
             # Location resolution failed - show warning and fall back to UTC
             if location_warning:
@@ -797,5 +1350,294 @@ def time_distance_result(
     if (from_is_now or to_is_now) and not is_ntp:
         result_lines.append("")
         result_lines.append("(Note: NTP unavailable, using local server time)")
+
+    return "\n".join(result_lines)
+
+
+# Holiday tool result functions
+
+
+def get_holidays_result(
+    country: str,
+    year: Optional[int] = None,
+    include_school_holidays: bool = False
+) -> str:
+    """
+    Generate the result string for get_holidays tool.
+
+    :param country: Country name or ISO code (e.g., "Poland", "PL").
+    :param year: Year to fetch holidays for (defaults to current year).
+    :param include_school_holidays: Whether to include school holiday periods.
+    :return: Formatted string with holiday information.
+    """
+    # Resolve country code
+    country_code = resolve_country_code(country)
+    if not country_code:
+        return (
+            f'Could not resolve country "{country}". '
+            'Please use an ISO country code (e.g., "PL", "DE", "US") '
+            'or full country name (e.g., "Poland", "Germany").'
+        )
+
+    # Get country name for display
+    try:
+        country_info = pycountry.countries.get(alpha_2=country_code)
+        country_name = country_info.name if country_info else country_code
+    except (KeyError, LookupError):
+        country_name = country_code
+
+    # Determine year (use NTP time for accuracy)
+    if year is None:
+        ntp_time, _ = get_ntp_datetime()
+        year = ntp_time.year
+
+    result_lines = []
+
+    # Fetch public holidays
+    # Try Nager.Date first, fallback to OpenHolidaysAPI
+    public_holidays = fetch_public_holidays_nager(country_code, year)
+    data_source = "Nager.Date"
+
+    if not public_holidays:
+        # Try OpenHolidaysAPI as fallback
+        if country_code in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+            public_holidays = fetch_public_holidays_openholidays(country_code, year)
+            data_source = "OpenHolidaysAPI"
+
+    if public_holidays:
+        result_lines.append(f"Public Holidays in {country_name} ({year}):")
+        for h in public_holidays:
+            local_name = h.get("local_name", "")
+            name = h.get("name", "")
+            date = h.get("date", "")
+
+            # Format: "- 2026-01-01: New Year's Day (Nowy Rok)"
+            if local_name and local_name != name:
+                result_lines.append(f"- {date}: {name} ({local_name})")
+            else:
+                result_lines.append(f"- {date}: {name}")
+    else:
+        result_lines.append(f"No public holiday data available for {country_name} ({year}).")
+        result_lines.append(
+            "This may be because the country is not supported or the API is unavailable."
+        )
+
+    # Fetch school holidays if requested
+    if include_school_holidays:
+        result_lines.append("")
+
+        if country_code in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+            school_holidays = fetch_school_holidays_openholidays(country_code, year)
+
+            if school_holidays:
+                result_lines.append(f"School Holidays in {country_name} ({year}):")
+
+                for h in school_holidays:
+                    start = h.get("start_date", "")
+                    end = h.get("end_date", "")
+                    name = h.get("name", "Unknown")
+                    regions = h.get("regions", [])
+                    is_nationwide = h.get("is_nationwide", False)
+
+                    if is_nationwide:
+                        result_lines.append(f"- {start} to {end}: {name} (nationwide)")
+                    elif regions:
+                        # Show region names
+                        region_str = ", ".join(regions)
+                        result_lines.append(f"- {start} to {end}: {name} [{region_str}]")
+                    else:
+                        result_lines.append(f"- {start} to {end}: {name}")
+
+                result_lines.append("")
+                result_lines.append("(Note: School holiday dates may vary by region)")
+            else:
+                result_lines.append(
+                    f"No school holiday data available for {country_name} ({year})."
+                )
+        else:
+            result_lines.append(
+                f"School holiday data is not available for {country_name}. "
+                f"Only {len(OPENHOLIDAYS_SUPPORTED_COUNTRIES)} countries are supported "
+                "for school holidays (mostly European countries)."
+            )
+
+    return "\n".join(result_lines)
+
+
+def is_holiday_result(
+    country: str = "",
+    date: Optional[str] = None,
+    city: str = ""
+) -> str:
+    """
+    Check if a specific date is a holiday in a given country or city.
+
+    :param country: Country name or ISO code (e.g., "Poland", "PL").
+    :param date: Date to check in ISO format (YYYY-MM-DD). Defaults to today.
+    :param city: City name (e.g., "Warsaw", "Krakow"). If provided, extracts
+                 country and subdivision for region-specific holiday info.
+    :return: Formatted string indicating if the date is a holiday.
+    """
+    country_code = None
+    country_name = None
+    subdivision_name = None
+    subdivision_code = None
+    location_display = None
+
+    # Priority: city parameter takes precedence for detailed location info
+    if city.strip():
+        geo_result = geocode_location_detailed(city.strip())
+        if geo_result:
+            country_code, subdivision_name, location_display = geo_result
+            # Try to find subdivision code for filtering school holidays
+            if subdivision_name and country_code:
+                subdivision_code = find_subdivision_code(country_code, subdivision_name)
+        else:
+            return (
+                f'Could not resolve city "{city}". '
+                'Try a major city name or use the country parameter instead.'
+            )
+
+    # Fall back to country parameter if no city or city didn't provide country
+    if not country_code and country.strip():
+        country_code = resolve_country_code(country)
+        if not country_code:
+            return (
+                f'Could not resolve country "{country}". '
+                'Please use an ISO country code (e.g., "PL", "DE", "US") '
+                'or full country name (e.g., "Poland", "Germany").'
+            )
+
+    # Must have at least country or city
+    if not country_code:
+        return (
+            'Please provide either a country (e.g., "Poland", "PL") '
+            'or a city (e.g., "Warsaw", "Berlin").'
+        )
+
+    # Get country name for display
+    if not country_name:
+        try:
+            country_info = pycountry.countries.get(alpha_2=country_code)
+            country_name = country_info.name if country_info else country_code
+        except (KeyError, LookupError):
+            country_name = country_code
+
+    # Parse date (default to today via NTP)
+    ntp_time, _ = get_ntp_datetime()
+
+    if date:
+        date = date.strip()
+        try:
+            check_date = datetime.fromisoformat(date).date()
+        except ValueError:
+            return (
+                f'Could not parse date "{date}". '
+                'Please use ISO format: YYYY-MM-DD (e.g., "2026-01-01").'
+            )
+    else:
+        check_date = ntp_time.date()
+
+    check_date_str = check_date.isoformat()
+    year = check_date.year
+
+    # Fetch public holidays
+    public_holidays = fetch_public_holidays_nager(country_code, year)
+    if not public_holidays and country_code in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+        public_holidays = fetch_public_holidays_openholidays(country_code, year)
+
+    # Check for public holiday match
+    matching_holidays = []
+    for h in public_holidays:
+        if h.get("date") == check_date_str:
+            name = h.get("name", "Unknown")
+            local_name = h.get("local_name", "")
+            if local_name and local_name != name:
+                matching_holidays.append(f"{name} ({local_name})")
+            else:
+                matching_holidays.append(name)
+
+    # Check for school holiday match (if country supported)
+    school_holiday_matches = []
+    if country_code in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+        school_holidays = fetch_school_holidays_openholidays(country_code, year)
+        for h in school_holidays:
+            start_str = h.get("start_date", "")
+            end_str = h.get("end_date", "")
+            try:
+                start_date = datetime.fromisoformat(start_str).date()
+                end_date = datetime.fromisoformat(end_str).date()
+                if start_date <= check_date <= end_date:
+                    name = h.get("name", "School Holiday")
+                    regions = h.get("regions", [])
+                    is_nationwide = h.get("is_nationwide", False)
+
+                    # If we have subdivision info, filter to matching region
+                    if subdivision_name and not is_nationwide:
+                        # Check if this holiday applies to the user's region
+                        applies_to_region = False
+                        for region in regions:
+                            # Match by region name (case-insensitive partial match)
+                            if (subdivision_name.lower() in region.lower() or
+                                    region.lower() in subdivision_name.lower()):
+                                applies_to_region = True
+                                break
+
+                        if not applies_to_region:
+                            continue  # Skip holidays not affecting user's region
+
+                    # Format the match
+                    if is_nationwide:
+                        match_text = f"{name} (nationwide)"
+                    elif subdivision_name and regions:
+                        # Show that this holiday applies to the user's region
+                        match_text = f"{name} (affects {subdivision_name})"
+                    elif regions:
+                        region_str = ", ".join(regions[:3])
+                        if len(regions) > 3:
+                            region_str += f" and {len(regions) - 3} more regions"
+                        match_text = f"{name} [{region_str}]"
+                    else:
+                        match_text = name
+
+                    school_holiday_matches.append(match_text)
+            except ValueError:
+                continue
+
+    # Build response
+    result_lines = []
+
+    # Show location if city was used
+    display_location = location_display if location_display else country_name
+
+    if matching_holidays:
+        result_lines.append(f"Yes, {check_date_str} is a holiday in {display_location}.")
+        result_lines.append("")
+        result_lines.append("Public Holiday(s):")
+        for holiday in matching_holidays:
+            result_lines.append(f"  - {holiday}")
+    else:
+        result_lines.append(
+            f"No, {check_date_str} is not a public holiday in {display_location}."
+        )
+
+    if school_holiday_matches:
+        if not matching_holidays:
+            result_lines = []
+            result_lines.append(
+                f"{check_date_str} is during a school holiday in {display_location}."
+            )
+        result_lines.append("")
+        if len(school_holiday_matches) == 1:
+            result_lines.append(f"School Holiday: {school_holiday_matches[0]}")
+        else:
+            result_lines.append("School Holidays:")
+            for match in school_holiday_matches:
+                result_lines.append(f"  - {match}")
+
+    # Add region context if city was specified
+    if city.strip() and subdivision_name:
+        result_lines.append("")
+        result_lines.append(f"Region: {subdivision_name}, {country_name}")
 
     return "\n".join(result_lines)

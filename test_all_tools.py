@@ -196,8 +196,8 @@ def main():
     tool_count = list_tools()
     if tool_count is not None:
         print(f"  Result: Found {tool_count} tools")
-        if tool_count != 4:
-            print(f"  WARNING: Expected 4 tools, got {tool_count}")
+        if tool_count != 6:
+            print(f"  WARNING: Expected 6 tools, got {tool_count}")
     else:
         print("  ERROR: Could not list tools")
     print()
@@ -238,6 +238,33 @@ def main():
         ("calculate_time_distance", {"from_date": "2025-01-15", "to_date": "2025-01-01"}, "Past direction", 240),
         ("calculate_time_distance", {"from_date": "2025-01-01T09:00:00", "to_date": "2025-01-01T17:30:00"}, "Same day with time", 250),
         ("calculate_time_distance", {"from_date": "now", "to_date": "2025-06-01", "city": "Warsaw"}, "With location", 260),
+
+        # get_holidays tests
+        ("get_holidays", {"country": "Poland"}, "Get holidays for Poland (current year)", 300),
+        ("get_holidays", {"country": "PL", "year": 2026}, "Get holidays with ISO code and year", 310),
+        ("get_holidays", {"country": "Germany", "include_school_holidays": True}, "Get holidays with school holidays", 320),
+        ("get_holidays", {"country": "United States"}, "Get holidays for USA (Nager.Date only)", 330),
+        ("get_holidays", {"country": "InvalidCountry"}, "Get holidays for invalid country (graceful error)", 340),
+
+        # is_holiday tests
+        ("is_holiday", {"country": "Poland", "date": "2026-01-01"}, "Check New Year's Day in Poland", 350),
+        ("is_holiday", {"country": "PL", "date": "2026-01-23"}, "Check non-holiday date in Poland", 360),
+        ("is_holiday", {"country": "US"}, "Check today in USA (default date)", 370),
+        ("is_holiday", {"country": "Germany", "date": "2026-12-25"}, "Check Christmas in Germany", 380),
+        ("is_holiday", {"country": "XYZ", "date": "2026-01-01"}, "Check invalid country (graceful error)", 390),
+
+        # is_holiday with city parameter tests
+        ("is_holiday", {"city": "Warsaw", "date": "2026-01-19"}, "Check school holiday in Warsaw (winter break)", 400),
+        ("is_holiday", {"city": "Krakow", "date": "2026-01-01"}, "Check New Year in Krakow (city lookup)", 410),
+        ("is_holiday", {"city": "Berlin"}, "Check today in Berlin (city default date)", 420),
+        ("is_holiday", {"city": "InvalidCity123"}, "Check invalid city (graceful error)", 430),
+
+        # is_holiday with smaller/less obvious cities (international diversity)
+        ("is_holiday", {"city": "Sieradz", "date": "2026-02-02"}, "Check school holiday in Sieradz, Poland (small city)", 440),
+        ("is_holiday", {"city": "Segovia", "date": "2026-12-25"}, "Check Christmas in Segovia, Spain (small city)", 450),
+        ("is_holiday", {"city": "Temuco", "date": "2026-09-18"}, "Check Independence Day in Temuco, Chile", 460),
+        ("is_holiday", {"city": "Braga", "date": "2026-06-10"}, "Check Portugal Day in Braga, Portugal", 470),
+        ("is_holiday", {"city": "Graz", "date": "2026-05-01"}, "Check Labour Day in Graz, Austria", 480),
     ]
 
     passed = 0

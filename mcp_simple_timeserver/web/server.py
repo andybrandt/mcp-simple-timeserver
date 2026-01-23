@@ -15,6 +15,8 @@ from ..core import (
     utc_time_result,
     current_time_result,
     time_distance_result,
+    get_holidays_result,
+    is_holiday_result,
 )
 
 
@@ -184,6 +186,100 @@ def calculate_time_distance(
     Uses accurate NTP time when "now" is specified.
     """
     return time_distance_result(from_date, to_date, unit, timezone, country, city)
+
+
+@app.tool(
+    annotations={
+        "title": "Get Holidays for a Country",
+        "readOnlyHint": True
+    }
+)
+def get_holidays(
+    country: str,
+    year: int = 0,
+    include_school_holidays: bool = False
+) -> str:
+    """
+    Get a list of public holidays (and optionally school holidays) for a country and year.
+    Use this tool when the user asks about holidays, days off, or vacation periods.
+
+    :param country: Country name or ISO code (required).
+        Examples: "Poland", "PL", "United States", "US", "Germany", "DE"
+        Supports common aliases like "UK" for United Kingdom.
+
+    :param year: Year to get holidays for (optional).
+        Defaults to current year if not specified or 0.
+        Examples: 2026, 2027
+
+    :param include_school_holidays: Whether to include school vacation periods (optional).
+        Default is False. Set to True to see school holidays.
+        School holidays are only available for ~36 countries (mostly European).
+        School holidays may vary by region (e.g., different dates for different states/provinces).
+
+    OUTPUT FORMAT:
+    - Public holidays: Date, name (with local name if different)
+    - School holidays (if requested): Date range, name, regions affected
+
+    EXAMPLES:
+    - get_holidays(country="Poland") - All public holidays in Poland this year
+    - get_holidays(country="DE", year=2026) - German holidays for 2026
+    - get_holidays(country="Poland", include_school_holidays=True) - Polish holidays + school vacations
+
+    NOTE: Public holiday data is available for ~119 countries.
+    School holiday data is available for ~36 countries (mostly European).
+    """
+    # Convert year=0 to None for the core function (means "use current year")
+    actual_year = year if year > 0 else None
+    return get_holidays_result(country, actual_year, include_school_holidays)
+
+
+@app.tool(
+    annotations={
+        "title": "Check if Date is a Holiday",
+        "readOnlyHint": True
+    }
+)
+def is_holiday(
+    country: str = "",
+    date: str = "",
+    city: str = ""
+) -> str:
+    """
+    Check if a specific date is a holiday in a given country or city.
+    Use this tool to quickly verify if a particular day is a public or school holiday.
+
+    LOCATION PARAMETERS (use at least one):
+
+    :param country: Country name or ISO code.
+        Examples: "Poland", "PL", "United States", "US"
+
+    :param city: City name (PRIMARY USE CASE for regional holidays).
+        Examples: "Warsaw", "Krakow", "Berlin", "Munich"
+        When specified, automatically detects country and region for accurate
+        school holiday filtering (e.g., school holidays vary by Polish voivodeship).
+
+    :param date: Date to check in ISO format YYYY-MM-DD (optional).
+        Defaults to today if not specified.
+        Examples: "2026-01-01", "2026-12-25"
+
+    OUTPUT FORMAT:
+    - Yes/No indication if the date is a public holiday
+    - Holiday name(s) if it is a holiday
+    - School holiday information filtered to the specific region (if city provided)
+
+    EXAMPLES:
+    - is_holiday(city="Warsaw", date="2026-01-19") - Check school holidays in Warsaw
+    - is_holiday(city="Krakow") - Check if today is a holiday in Krakow
+    - is_holiday(country="Poland", date="2026-01-01") - Check New Year's Day in Poland
+    - is_holiday(country="Germany", date="2026-12-25") - Check Christmas Day in Germany
+
+    NOTE: Using city parameter provides region-specific school holiday info.
+    School holidays vary by region in many countries (e.g., Polish voivodeships,
+    German Bundesländer). Only ~36 countries have school holiday data available.
+    """
+    # Convert empty strings to appropriate values for the core function
+    actual_date = date if date else None
+    return is_holiday_result(country, actual_date, city)
 
 
 if __name__ == "__main__":

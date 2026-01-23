@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-simple-timeserver"
-version = "3.1.0"
+version = "3.2.0"
 authors = [
   { name="Andy Brandt", email="andy@codesprinters.com" },
 ]
@@ -27,6 +27,7 @@ dependencies = [
     "timezonefinder>=6.0",
     "requests>=2.28",
     "tzdata",
+    "pycountry>=24.0",
 ]
 
 [tool.setuptools.packages.find]
