@@ -4,20 +4,20 @@ This guide explains how to run the network-hostable version of the `mcp-simple-t
 
 ## Overview
 
-The web server is a stateless service that exposes 8 tools:
+The web server is a stateless service that exposes 6 tools:
 
 | Tool | Description |
 |------|-------------|
 | `get_server_time` | Returns the local time and timezone of the server machine |
 | `get_utc` | Returns accurate UTC time from an NTP server |
-| `get_iso_week_date` | Returns the current date in ISO 8601 week date format |
-| `get_unix_timestamp` | Returns the current Unix/POSIX timestamp |
-| `get_hijri_date` | Returns the current date and time in the Islamic (Hijri) calendar |
-| `get_japanese_era_date` | Returns the current date and time in Japanese Era calendar (supports "en" or "ja") |
-| `get_hebrew_date` | Returns the current date and time in Hebrew calendar (supports "en" or "he") |
-| `get_persian_date` | Returns the current date and time in Persian/Jalali calendar (supports "en" or "fa") |
+| `get_current_time` | Returns current time with optional location, timezone, and calendar conversions |
+| `calculate_time_distance` | Calculates duration between two dates/times (countdowns, elapsed time) |
+| `get_holidays` | Returns public holidays (and optionally school holidays) for a country |
+| `is_holiday` | Checks if a specific date is a holiday in a given country or city |
 
 All tools (except `get_server_time`) use accurate time from NTP servers with graceful fallback to local time.
+
+See the main [README.md](README.md) for detailed documentation of tool parameters and usage examples.
 
 It runs using FastMCP's built-in web server (based on Uvicorn/Starlette).
 
