@@ -239,6 +239,25 @@ def main():
         ("calculate_time_distance", {"from_date": "2025-01-01T09:00:00", "to_date": "2025-01-01T17:30:00"}, "Same day with time", 250),
         ("calculate_time_distance", {"from_date": "now", "to_date": "2025-06-01", "city": "Warsaw"}, "With location", 260),
 
+        # Business days tests (inclusive, date-based)
+        ("calculate_time_distance", {"from_date": "2026-01-05", "to_date": "2026-01-09", "business_days": True}, "Mon-Fri = 5 business days", 265),
+        ("calculate_time_distance", {"from_date": "2026-01-03", "to_date": "2026-01-04", "business_days": True}, "Sat-Sun = 0 business days", 266),
+
+        # Same-day edge cases
+        ("calculate_time_distance", {"from_date": "2026-01-05", "to_date": "2026-01-05", "business_days": True}, "Same day (Monday) = 1 business day", 267),
+        ("calculate_time_distance", {"from_date": "2026-01-04", "to_date": "2026-01-04", "business_days": True}, "Same day (Sunday) = 0 business days", 268),
+
+        ("calculate_time_distance", {"from_date": "2026-01-01", "to_date": "2026-01-10", "business_days": True, "exclude_holidays": True, "country": "Poland"}, "With holidays (excludes Jan 1 New Year, Jan 6 Epiphany)", 269),
+        ("calculate_time_distance", {"from_date": "2026-01-01", "to_date": "2026-01-10", "business_days": True, "exclude_holidays": True}, "exclude_holidays without country (should warn)", 270),
+
+        # Global coverage (non-Europe + city-based country extraction)
+        ("calculate_time_distance", {"from_date": "2026-01-01", "to_date": "2026-01-07", "business_days": True, "exclude_holidays": True, "country": "United States"}, "US: New Year's Day (non-Europe)", 271),
+        ("calculate_time_distance", {"from_date": "2026-01-01", "to_date": "2026-01-07", "business_days": True, "exclude_holidays": True, "country": "Japan"}, "Japan: New Year's Day (Asia)", 272),
+        ("calculate_time_distance", {"from_date": "2026-01-26", "to_date": "2026-01-30", "business_days": True, "exclude_holidays": True, "city": "Sydney"}, "Australia: Australia Day (Oceania, city-based)", 273),
+        ("calculate_time_distance", {"from_date": "2026-04-24", "to_date": "2026-04-28", "business_days": True, "exclude_holidays": True, "country": "South Africa"}, "South Africa: Freedom Day (Africa)", 274),
+        ("calculate_time_distance", {"from_date": "2026-04-20", "to_date": "2026-04-24", "business_days": True, "exclude_holidays": True, "city": "Sao Paulo"}, "Brazil: Tiradentes Day (South America, city-based)", 275),
+        ("calculate_time_distance", {"from_date": "2026-01-01", "to_date": "2026-01-07", "business_days": True, "exclude_holidays": True, "city": "Tokyo"}, "City-based country extraction (Tokyo → Japan)", 276),
+
         # get_holidays tests
         ("get_holidays", {"country": "Poland"}, "Get holidays for Poland (current year)", 300),
         ("get_holidays", {"country": "PL", "year": 2026}, "Get holidays with ISO code and year", 310),

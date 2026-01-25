@@ -11,13 +11,13 @@ The web server is a stateless service that exposes 6 tools:
 | `get_server_time` | Returns the local time and timezone of the server machine |
 | `get_utc` | Returns accurate UTC time from an NTP server |
 | `get_current_time` | Returns current time with optional location, timezone, and calendar conversions |
-| `calculate_time_distance` | Calculates duration between two dates/times (countdowns, elapsed time) |
+| `calculate_time_distance` | Calculates duration between two dates/times (countdowns, elapsed time, or business-day counts) |
 | `get_holidays` | Returns public holidays (and optionally school holidays) for a country |
 | `is_holiday` | Checks if a specific date is a holiday in a given country or city |
 
 All tools (except `get_server_time`) use accurate time from NTP servers with graceful fallback to local time.
 
-See the main [README.md](README.md) for detailed documentation of tool parameters and usage examples.
+The `calculate_time_distance` tool also supports `business_days` and `exclude_holidays` parameters for date-based, inclusive business-day counting. See the main [README.md](README.md) for detailed documentation of tool parameters and usage examples.
 
 It runs using FastMCP's built-in web server (based on Uvicorn/Starlette).
 

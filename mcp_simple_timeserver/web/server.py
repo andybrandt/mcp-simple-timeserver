@@ -141,7 +141,9 @@ def calculate_time_distance(
     unit: str = "auto",
     timezone: str = "",
     city: str = "",
-    country: str = ""
+    country: str = "",
+    business_days: bool = False,
+    exclude_holidays: bool = False
 ) -> str:
     """
     Calculate the duration/distance between two dates or datetimes.
@@ -177,6 +179,21 @@ def calculate_time_distance(
     - From/To: The parsed datetime values
     - UTC Reference: Both times converted to UTC
 
+    BUSINESS DAYS MODE (optional):
+
+    :param business_days: Count only business days (Mon-Fri), excluding weekends. Default: False.
+        When True, returns business day count instead of elapsed-time duration.
+        Time-of-day is ignored; dates are counted as full days (inclusive endpoints).
+        The `unit` parameter is ignored in this mode.
+
+    :param exclude_holidays: Also exclude public holidays. Default: False.
+        Only effective when business_days=True.
+        Requires country or city parameter to determine which holidays to exclude.
+        If country cannot be determined, proceeds with weekend-only exclusion.
+
+    Example: "How many business days until project deadline?"
+        from_date="now", to_date="2026-03-15", business_days=True, country="Poland"
+
     COMMON USE CASES:
     - "How many days until Dec 31?" → from_date="now", to_date="2025-12-31"
     - "How long since Jan 1?" → from_date="2025-01-01", to_date="now"
@@ -185,7 +202,16 @@ def calculate_time_distance(
     NOTE: If both parameters are the same (e.g., both "now"), returns an error message.
     Uses accurate NTP time when "now" is specified.
     """
-    return time_distance_result(from_date, to_date, unit, timezone, country, city)
+    return time_distance_result(
+        from_date,
+        to_date,
+        unit,
+        timezone,
+        country,
+        city,
+        business_days,
+        exclude_holidays
+    )
 
 
 @app.tool(

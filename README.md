@@ -59,10 +59,16 @@ Calculate duration between two dates or times:
 | `from_date` | Start date (ISO 8601 or "now") | `"2025-01-15"`, `"now"` |
 | `to_date` | End date (ISO 8601 or "now") | `"2025-12-31"`, `"2025-06-01T17:00:00"` |
 | `unit` | Output format | `"auto"`, `"days"`, `"weeks"`, `"hours"`, `"minutes"`, `"seconds"` |
+| `business_days` | Count only Mon-Fri (date-based, inclusive) | `true` |
+| `exclude_holidays` | Also exclude public holidays (requires country/city) | `true` |
 
 Location parameters (`city`, `country`, `timezone`) can also be used to specify timezone context.
 
+When `business_days=true`, time-of-day is ignored and dates are counted as full days (inclusive endpoints).
+The `unit` parameter is ignored in this mode. Holidays are excluded only when they fall on weekdays.
+
 Example: `calculate_time_distance(from_date="now", to_date="2025-12-31")` returns a countdown to New Year's Eve.
+Example: `calculate_time_distance(from_date="2026-01-26", to_date="2026-01-30", business_days=true, exclude_holidays=true, city="Sydney")` returns the number of business days in that range.
 
 ### Holiday Information via `get_holidays` and `is_holiday`
 

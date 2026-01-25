@@ -1237,13 +1237,90 @@ def format_duration_by_unit(total_seconds: int, unit: str) -> str:
         return f"{seconds} seconds"
 
 
+def count_business_days(
+    from_dt: datetime,
+    to_dt: datetime,
+    exclude_holidays: bool = False,
+    country_code: Optional[str] = None
+) -> tuple[int, int, int, list[str]]:
+    """
+    Count business days between two dates.
+
+    Returns: (business_days, weekend_days, holidays_excluded, holiday_names)
+    """
+    start_date = from_dt.date()
+    end_date = to_dt.date()
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    holiday_dates = set()
+    holiday_names_by_date = {}
+
+    # Fetch holidays once per year if requested
+    if exclude_holidays and country_code:
+        # Include the end year (range upper bound is exclusive).
+        for year in range(start_date.year, end_date.year + 1):
+            holidays = fetch_public_holidays_nager(country_code, year)
+            if not holidays and country_code in OPENHOLIDAYS_SUPPORTED_COUNTRIES:
+                holidays = fetch_public_holidays_openholidays(country_code, year)
+
+            for holiday in holidays:
+                date_str = holiday.get("date", "")
+                if not date_str:
+                    continue
+                try:
+                    holiday_date = datetime.fromisoformat(date_str).date()
+                except ValueError:
+                    continue
+
+                if holiday_date < start_date or holiday_date > end_date:
+                    continue
+
+                holiday_dates.add(holiday_date)
+
+                name = holiday.get("name", "")
+                local_name = holiday.get("local_name", "")
+                if local_name and local_name != name:
+                    display_name = f"{name} ({local_name})" if name else local_name
+                else:
+                    display_name = name or local_name
+
+                if display_name:
+                    holiday_names_by_date.setdefault(holiday_date, [])
+                    if display_name not in holiday_names_by_date[holiday_date]:
+                        holiday_names_by_date[holiday_date].append(display_name)
+
+    business_days = 0
+    weekend_days = 0
+    holidays_excluded = 0
+    holiday_names = []
+
+    current_date = start_date
+    while current_date <= end_date:
+        if current_date.weekday() >= 5:
+            weekend_days += 1
+        elif exclude_holidays and country_code and current_date in holiday_dates:
+            holidays_excluded += 1
+            for name in holiday_names_by_date.get(current_date, []):
+                if name not in holiday_names:
+                    holiday_names.append(name)
+        else:
+            business_days += 1
+
+        current_date += timedelta(days=1)
+
+    return business_days, weekend_days, holidays_excluded, holiday_names
+
+
 def time_distance_result(
     from_date: str = "now",
     to_date: str = "now",
     unit: str = "auto",
     tz: str = "",
     country: str = "",
-    city: str = ""
+    city: str = "",
+    business_days: bool = False,
+    exclude_holidays: bool = False
 ) -> str:
     """
     Calculate the duration between two dates/datetimes.
@@ -1262,7 +1339,7 @@ def time_distance_result(
 
     # Quick check: if both parameters are identical strings, return error immediately
     # This handles both "now"/"now" case and identical explicit dates
-    if from_date == to_date:
+    if from_date == to_date and not business_days:
         return "Distance: 0 (same parameters, error?)"
 
     # Resolve timezone if location parameters provided
@@ -1296,7 +1373,7 @@ def time_distance_result(
         return str(e)
 
     # Check if parsed datetimes are equal (handles different string formats resolving to same time)
-    if from_dt == to_dt:
+    if from_dt == to_dt and not business_days:
         return "Distance: 0 (same parameters, error?)"
 
     # Calculate the difference
@@ -1309,42 +1386,97 @@ def time_distance_result(
     else:
         direction = "past"
 
-    # Format duration based on unit
-    valid_units = ["auto", "days", "weeks", "hours", "minutes", "seconds"]
-    if unit.lower() not in valid_units:
-        unit = "auto"
+    if business_days:
+        # Get country code for holiday exclusion
+        country_code = None
+        if exclude_holidays:
+            country_code = _extract_country_code_from_location(country, location_name)
+            if not country_code:
+                result_lines.append(
+                    "Note: Could not determine country for holiday exclusion."
+                )
+                result_lines.append(
+                    "Business days calculated without holiday exclusion."
+                )
+                result_lines.append("")
 
-    if unit.lower() == "auto":
-        detailed, simplified = format_duration_human(total_seconds)
-        result_lines.append(f"Distance: {detailed}")
-        result_lines.append(f"Human readable: {simplified}")
+        biz_days, weekends, holidays_count, holiday_names = count_business_days(
+            from_dt,
+            to_dt,
+            exclude_holidays and country_code is not None,
+            country_code
+        )
+
+        # Format output (calendar-based, inclusive)
+        calendar_days = abs((to_dt.date() - from_dt.date()).days) + 1
+        result_lines.append(f"Distance: {biz_days} business days")
+        breakdown = f"{calendar_days} calendar days - {weekends} weekend days"
+        if exclude_holidays and country_code:
+            breakdown += f" - {holidays_count} holidays"
+        result_lines.append(f"Breakdown: {breakdown}")
+
+        if holiday_names:
+            # Truncated list: show first 3 names + "and X more" if longer
+            max_holiday_names = 3
+            if len(holiday_names) <= max_holiday_names:
+                result_lines.append(f"Holidays excluded: {', '.join(holiday_names)}")
+            else:
+                shown = ", ".join(holiday_names[:max_holiday_names])
+                remaining = len(holiday_names) - max_holiday_names
+                result_lines.append(
+                    f"Holidays excluded: {shown}, and {remaining} more"
+                )
+
+        # Standard output sections (same as non-business mode)
+        result_lines.append(f"Direction: {direction}")
+        result_lines.append("")
+        result_lines.append(f"From: {from_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        result_lines.append(f"To: {to_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        if location_name:
+            result_lines.append(f"Location: {location_name}")
+        result_lines.append("")
+        result_lines.append("UTC Reference:")
+        from_utc = from_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        to_utc = to_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        result_lines.append(f"  From: {from_utc} UTC")
+        result_lines.append(f"  To: {to_utc} UTC")
     else:
-        formatted_unit = format_duration_by_unit(total_seconds, unit.lower())
-        result_lines.append(f"Distance: {formatted_unit}")
+        # Format duration based on unit
+        valid_units = ["auto", "days", "weeks", "hours", "minutes", "seconds"]
+        if unit.lower() not in valid_units:
+            unit = "auto"
 
-    result_lines.append(f"Direction: {direction}")
+        if unit.lower() == "auto":
+            detailed, simplified = format_duration_human(total_seconds)
+            result_lines.append(f"Distance: {detailed}")
+            result_lines.append(f"Human readable: {simplified}")
+        else:
+            formatted_unit = format_duration_by_unit(total_seconds, unit.lower())
+            result_lines.append(f"Distance: {formatted_unit}")
 
-    # Add date details section
-    result_lines.append("")
+        result_lines.append(f"Direction: {direction}")
 
-    # Format the from/to dates for display
-    from_display = from_dt.strftime("%Y-%m-%d %H:%M:%S")
-    to_display = to_dt.strftime("%Y-%m-%d %H:%M:%S")
+        # Add date details section
+        result_lines.append("")
 
-    result_lines.append(f"From: {from_display}")
-    result_lines.append(f"To: {to_display}")
+        # Format the from/to dates for display
+        from_display = from_dt.strftime("%Y-%m-%d %H:%M:%S")
+        to_display = to_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Add location info if provided
-    if tz_obj and location_name:
-        result_lines.append(f"Location: {location_name}")
+        result_lines.append(f"From: {from_display}")
+        result_lines.append(f"To: {to_display}")
 
-    # Add UTC reference
-    result_lines.append("")
-    result_lines.append("UTC Reference:")
-    from_utc = from_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    to_utc = to_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    result_lines.append(f"  From: {from_utc} UTC")
-    result_lines.append(f"  To: {to_utc} UTC")
+        # Add location info if provided
+        if tz_obj and location_name:
+            result_lines.append(f"Location: {location_name}")
+
+        # Add UTC reference
+        result_lines.append("")
+        result_lines.append("UTC Reference:")
+        from_utc = from_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        to_utc = to_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        result_lines.append(f"  From: {from_utc} UTC")
+        result_lines.append(f"  To: {to_utc} UTC")
 
     # Add NTP fallback notice if applicable
     if (from_is_now or to_is_now) and not is_ntp:
