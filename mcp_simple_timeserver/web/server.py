@@ -29,7 +29,7 @@ _version = version("mcp-simple-timeserver")
 app = FastMCP(
     "mcp-simple-timeserver",
     version=_version,
-    stateless_http=True,
+    stateless_http=False,
     auth=None  # Explicitly disable authentication
 )
 
