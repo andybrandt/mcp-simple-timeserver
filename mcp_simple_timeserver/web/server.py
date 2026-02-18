@@ -29,7 +29,6 @@ _version = version("mcp-simple-timeserver")
 app = FastMCP(
     "mcp-simple-timeserver",
     version=_version,
-    stateless_http=False,
     auth=None  # Explicitly disable authentication
 )
 
@@ -311,4 +310,6 @@ def is_holiday(
 if __name__ == "__main__":
     # Run the server with streamable-http transport
     # Host 0.0.0.0 to listen on all interfaces inside the container
-    app.run(transport="streamable-http", host="0.0.0.0", port=8000)
+    app.run(transport="streamable-http", host="0.0.0.0", 
+        stateless_http=False,
+        port=8000)
