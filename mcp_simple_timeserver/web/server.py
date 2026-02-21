@@ -175,7 +175,7 @@ def calculate_time_distance(
     - Distance: The calculated duration
     - Human readable: Simplified summary (when unit="auto")
     - Direction: "future" if to_date > from_date, "past" if to_date < from_date
-    - From/To: The parsed datetime values
+    - From/To: The parsed datetime values with day of the week in parentheses
     - UTC Reference: Both times converted to UTC
 
     BUSINESS DAYS MODE (optional):

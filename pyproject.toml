@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-simple-timeserver"
-version = "3.3.2"
+version = "3.3.3"
 authors = [
   { name="Andy Brandt", email="andy@codesprinters.com" },
 ]
@@ -17,7 +17,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "fastmcp<4.0",
+    "fastmcp>=3.0.0rc2",
     "ntplib",
     "hijridate",
     "japanera",

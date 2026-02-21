@@ -1430,8 +1430,12 @@ def time_distance_result(
         # Standard output sections (same as non-business mode)
         result_lines.append(f"Direction: {direction}")
         result_lines.append("")
-        result_lines.append(f"From: {from_dt.strftime('%Y-%m-%d %H:%M:%S')}")
-        result_lines.append(f"To: {to_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        result_lines.append(
+            f"From: {from_dt.strftime('%Y-%m-%d %H:%M:%S')} ({from_dt.strftime('%A')})"
+        )
+        result_lines.append(
+            f"To: {to_dt.strftime('%Y-%m-%d %H:%M:%S')} ({to_dt.strftime('%A')})"
+        )
         if location_name:
             result_lines.append(f"Location: {location_name}")
         result_lines.append("")
@@ -1459,12 +1463,14 @@ def time_distance_result(
         # Add date details section
         result_lines.append("")
 
-        # Format the from/to dates for display
+        # Format the from/to dates for display, including day of the week
         from_display = from_dt.strftime("%Y-%m-%d %H:%M:%S")
+        from_day = from_dt.strftime("%A")
         to_display = to_dt.strftime("%Y-%m-%d %H:%M:%S")
+        to_day = to_dt.strftime("%A")
 
-        result_lines.append(f"From: {from_display}")
-        result_lines.append(f"To: {to_display}")
+        result_lines.append(f"From: {from_display} ({from_day})")
+        result_lines.append(f"To: {to_display} ({to_day})")
 
         # Add location info if provided
         if tz_obj and location_name:
