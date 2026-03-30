@@ -142,6 +142,10 @@ Typical configuration would look like this:
 }
 ```
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/andybrandt-mcp-simple-timeserver).
+
 ## Web Server Variant
 
 This project also includes a network-hostable version that can be deployed as a standalone web server. For instructions on how to run and deploy it, please see the [Web Server Deployment Guide](WEB_DEPLOYMENT.md).
