@@ -1237,6 +1237,149 @@ def format_duration_by_unit(total_seconds: int, unit: str) -> str:
         return f"{seconds} seconds"
 
 
+def find_nonexistent_local_time(dt: datetime) -> Optional[datetime]:
+    """
+    Detect a local time that does not exist because a clock change skipped it.
+
+    A time inside a spring-forward gap (for example 02:30 on the night clocks
+    move from 02:00 to 03:00) is read with the pre-change offset, so a round
+    trip through UTC returns a different clock reading. Repeated (ambiguous)
+    times round-trip unchanged and are not reported here.
+
+    :param dt: Timezone-aware datetime.
+    :return: The clock reading the time maps to (for example 03:30 for 02:30),
+             or None when the time exists.
+    """
+    # A skipped time comes back from a UTC round trip as a different reading.
+    round_trip = dt.astimezone(timezone.utc).astimezone(dt.tzinfo)
+    if round_trip.replace(tzinfo=None) != dt.replace(tzinfo=None):
+        return round_trip
+    return None
+
+
+def describe_nonexistent_local_time(
+    parameter_name: str,
+    requested: datetime,
+    existing_reading: datetime,
+    date_only: bool = False
+) -> str:
+    """
+    Build the message returned when an input is a skipped local time.
+
+    :param parameter_name: "from_date" or "to_date".
+    :param requested: The parsed (non-existent) datetime.
+    :param existing_reading: The reading it maps to, from find_nonexistent_local_time.
+    :param date_only: True when the input had no time part (read as midnight).
+    :return: Explanatory message for the AI reader.
+    """
+    # Name the zone and measure how far the clocks jumped forward.
+    zone_name = getattr(requested.tzinfo, "key", None) or str(requested.tzinfo)
+    jump = existing_reading.replace(tzinfo=None) - requested.replace(tzinfo=None)
+    jump_text, _ = format_duration_human(abs(int(jump.total_seconds())))
+    requested_text = requested.strftime("%Y-%m-%d %H:%M:%S")
+    suggestion = existing_reading.strftime("%Y-%m-%d %H:%M:%S")
+    # Explain the 00:00:00 the user never typed.
+    date_only_note = " A date without a time is read as 00:00:00." if date_only else ""
+    return (
+        f'{parameter_name} "{requested_text}" does not exist in {zone_name}: the clocks '
+        f"jump forward by {jump_text} on that date and skip this time.{date_only_note} "
+        f"Please use a time that exists, for example {suggestion}."
+    )
+
+
+def describe_clock_change(from_dt: datetime, to_dt: datetime) -> str:
+    """
+    Describe a clock change between two moments, or return an empty string.
+
+    Real elapsed time equals the clock-time difference minus the net change of
+    the UTC offset, so the two only disagree when the UTC offsets at the two
+    moments differ. Equal offsets mean no discrepancy, however many clock
+    changes lie in between. Assumes the two moments are different instants
+    (time_distance_result returns early when they are equal).
+
+    :param from_dt: First timezone-aware datetime.
+    :param to_dt: Second timezone-aware datetime.
+    :return: Notice text for the AI reader, or "" when the UTC offsets are equal.
+    """
+    # Equal (or unknown) offsets: the clock-time difference is the real one.
+    from_offset = from_dt.utcoffset()
+    to_offset = to_dt.utcoffset()
+    if from_offset is None or to_offset is None or from_offset == to_offset:
+        return ""
+
+    # Signed differences: the local readings subtracted exactly as printed,
+    # and the real elapsed time on the UTC timeline.
+    clock_delta = to_dt.replace(tzinfo=None) - from_dt.replace(tzinfo=None)
+    real_delta = to_dt.astimezone(timezone.utc) - from_dt.astimezone(timezone.utc)
+    zero = timedelta(0)
+
+    # Net change of the UTC offset from the earlier to the later moment.
+    if real_delta >= zero:
+        offset_change = to_offset - from_offset
+    else:
+        offset_change = from_offset - to_offset
+    direction_word = "forward" if offset_change > zero else "back"
+    change_text, _ = format_duration_human(abs(int(offset_change.total_seconds())))
+
+    # Calendar days between the two dates as printed.
+    calendar_days = abs((to_dt.date() - from_dt.date()).days)
+    day_word = "day" if calendar_days == 1 else "days"
+    calendar_text = f"{calendar_days} calendar {day_word} between the two dates"
+
+    # Name the zone only when both moments carry the same IANA zone; two
+    # different offsets alone do not prove that a zone changed its clocks.
+    from_key = getattr(from_dt.tzinfo, "key", None)
+    to_key = getattr(to_dt.tzinfo, "key", None)
+    if from_key and from_key == to_key:
+        subject = f"{from_key} changed its UTC offset between these two moments"
+    else:
+        subject = "The UTC offset differs between these two moments"
+
+    # The printed clock times can only be subtracted meaningfully when they
+    # are in the same order as the real moments (they are not inside a
+    # repeated hour, where the clock runs backwards).
+    clock_forward = clock_delta > zero
+    clock_backward = clock_delta < zero
+    same_order = (clock_forward and real_delta > zero) or (clock_backward and real_delta < zero)
+    closing_without_clock = (
+        "Use the Distance for how much time actually passed; use the calendar day "
+        "count for questions about calendar days."
+    )
+    if same_order:
+        clock_text, _ = format_duration_human(abs(int(clock_delta.total_seconds())))
+        clock_sentence = (
+            f"Subtracting the local clock times shown above gives {clock_text} "
+            f"({calendar_text}), which is not the real elapsed time."
+        )
+        closing_sentence = (
+            "Use the Distance for how much time actually passed; use the clock-time "
+            "difference or the calendar day count for questions about calendar days."
+        )
+    elif clock_delta == zero:
+        # Equal readings with different offsets: not reversed, just identical.
+        clock_sentence = (
+            "The local clock times shown above are identical, so subtracting them gives zero "
+            f"({calendar_text}) even though the real moments differ."
+        )
+        closing_sentence = closing_without_clock
+    else:
+        clock_sentence = (
+            "The local clock times shown above are in the opposite order to the "
+            f"real moments, so subtracting them is meaningless ({calendar_text})."
+        )
+        closing_sentence = closing_without_clock
+
+    return (
+        f"Clock change notice: {subject} "
+        f"(From: {_format_utc_offset(from_dt)}, To: {_format_utc_offset(to_dt)}). "
+        "The Distance above is real elapsed time, measured on the UTC timeline.\n"
+        f"From the earlier to the later moment the UTC offset moved {direction_word} "
+        f"by {change_text}. "
+        f"{clock_sentence} "
+        f"{closing_sentence}"
+    )
+
+
 def count_business_days(
     from_dt: datetime,
     to_dt: datetime,
@@ -1372,13 +1515,39 @@ def time_distance_result(
     except ValueError as e:
         return str(e)
 
+    # Reject explicit local times that a clock change skipped (for example
+    # 02:30 on a spring-forward night): Python would silently read them with
+    # the pre-change offset. "now" always exists, and business-days mode
+    # ignores time of day, so both are exempt.
+    if not business_days:
+        for parameter_name, raw_value, parsed_dt in (
+            ("from_date", from_date, from_dt),
+            ("to_date", to_date, to_dt),
+        ):
+            if raw_value == "now":
+                continue
+            existing_reading = find_nonexistent_local_time(parsed_dt)
+            if existing_reading is not None:
+                # Same rule as parse_date_input: "t" or a space means a time was given.
+                date_only = not ("t" in raw_value or " " in raw_value)
+                return describe_nonexistent_local_time(
+                    parameter_name, parsed_dt, existing_reading, date_only=date_only
+                )
+
+    # Convert both moments to the UTC timeline. Python compares and subtracts
+    # two datetimes that share a ZoneInfo by their wall-clock fields, which
+    # ignores daylight-saving offset changes (GitHub issue #12) and treats the
+    # two occurrences of a repeated hour as the same moment.
+    from_instant = from_dt.astimezone(timezone.utc)
+    to_instant = to_dt.astimezone(timezone.utc)
+
     # Check if parsed datetimes are equal (handles different string formats resolving to same time)
-    if from_dt == to_dt and not business_days:
+    if from_instant == to_instant and not business_days:
         return "Distance: 0 (same parameters, error?)"
 
-    # Calculate the difference
-    delta = to_dt - from_dt
-    total_seconds = int(delta.total_seconds())
+    # Calculate real elapsed time on the UTC timeline. This single number
+    # drives the direction and every output unit.
+    total_seconds = int((to_instant - from_instant).total_seconds())
 
     # Determine direction
     if total_seconds > 0:
@@ -1483,6 +1652,15 @@ def time_distance_result(
         to_utc = to_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         result_lines.append(f"  From: {from_utc} UTC")
         result_lines.append(f"  To: {to_utc} UTC")
+
+    # Warn the reader when a clock change makes the clock-time difference and
+    # the real elapsed time disagree. Business-days mode ignores time of day,
+    # so it never gets the notice.
+    if not business_days:
+        clock_notice = describe_clock_change(from_dt, to_dt)
+        if clock_notice:
+            result_lines.append("")
+            result_lines.append(clock_notice)
 
     # Add NTP fallback notice if applicable
     if (from_is_now or to_is_now) and not is_ntp:

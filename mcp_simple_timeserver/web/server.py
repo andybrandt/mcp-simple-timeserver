@@ -156,7 +156,7 @@ def calculate_time_distance(
 
     :param unit: Output format for the distance. Options:
         - "auto" (default) - Human-readable breakdown (e.g., "15 days, 3 hours, 45 minutes")
-        - "days" - Decimal days (e.g., "15.50 days")
+        - "days" - Decimal days of 24 elapsed hours (e.g., "15.50 days")
         - "weeks" - Decimal weeks (e.g., "2.21 weeks")
         - "hours" - Decimal hours (e.g., "372.00 hours")
         - "minutes" - Decimal minutes (e.g., "22320.00 minutes")
@@ -197,6 +197,14 @@ def calculate_time_distance(
     - "How many days until Dec 31?" → from_date="now", to_date="2025-12-31"
     - "How long since Jan 1?" → from_date="2025-01-01", to_date="now"
     - "Duration between two dates" → from_date="2025-01-01", to_date="2025-03-15"
+
+    CLOCK CHANGES: Distance is always real elapsed time. If the UTC offset differs between the
+    two moments (daylight-saving change), a "Clock change notice" is appended (not in
+    business_days mode) with the calendar day count and, where meaningful, the clock-time
+    difference; a calendar day across a change is typically 23 or 25 elapsed hours (e.g. 0.96
+    days). Read the notice before answering questions about whole calendar days. If a given
+    local time does not exist (skipped by a spring-forward clock change), a message explaining
+    this is returned instead of a result (not in business_days mode).
 
     NOTE: If both parameters are the same (e.g., both "now"), returns an error message.
     Uses accurate NTP time when "now" is specified.

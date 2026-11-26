@@ -237,6 +237,8 @@ def main():
         ("calculate_time_distance", {"from_date": "2025-01-01", "to_date": "2025-01-15", "unit": "weeks"}, "Distance in weeks", 230),
         ("calculate_time_distance", {"from_date": "2025-01-15", "to_date": "2025-01-01"}, "Past direction", 240),
         ("calculate_time_distance", {"from_date": "2025-01-01T09:00:00", "to_date": "2025-01-01T17:30:00"}, "Same day with time", 250),
+        ("calculate_time_distance", {"from_date": "2026-03-28T12:00:00", "to_date": "2026-03-29T12:00:00", "unit": "hours", "timezone": "Europe/Madrid"}, "Clock change: 23 elapsed hours plus notice (issue #12)", 255),
+        ("calculate_time_distance", {"from_date": "2026-03-01T12:00:00", "to_date": "2026-11-01T12:00:00", "unit": "days", "timezone": "Europe/Madrid"}, "Two changes cancel out: 245 days, no notice", 256),
         ("calculate_time_distance", {"from_date": "now", "to_date": "2025-06-01", "city": "Warsaw"}, "With location", 260),
 
         # Business days tests (inclusive, date-based)
